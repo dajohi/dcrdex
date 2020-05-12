@@ -59,7 +59,7 @@ func NextID() uint64 {
 }
 
 // MsgHandler describes a handler for a specific message route.
-type MsgHandler func(Link, *msgjson.Message) *msgjson.Error
+type MsgHandler func(context.Context, Link, *msgjson.Message) *msgjson.Error
 
 // rpcRoutes maps message routes to the handlers.
 var rpcRoutes = make(map[string]MsgHandler)
@@ -225,7 +225,7 @@ func (s *Server) Run(ctx context.Context) {
 		// connections. We must wait on each websocketHandler to return in
 		// response to disconnectClients.
 		wg.Add(1)
-		go s.websocketHandler(&wg, wsConn, ip)
+		go s.websocketHandler(ctx, &wg, wsConn, ip)
 	})
 
 	// Start serving.
@@ -289,14 +289,14 @@ func (s *Server) banish(ip string) {
 // websocketHandler handles a new websocket client by creating a new wsClient,
 // starting it, and blocking until the connection closes. This method should be
 // run as a goroutine.
-func (s *Server) websocketHandler(wg *sync.WaitGroup, conn ws.Connection, ip string) {
+func (s *Server) websocketHandler(ctx context.Context, wg *sync.WaitGroup, conn ws.Connection, ip string) {
 	defer wg.Done()
 	log.Tracef("New websocket client %s", ip)
 
 	// Create a new websocket client to handle the new websocket connection
 	// and wait for it to shutdown.  Once it has shutdown (and hence
 	// disconnected), remove it.
-	client := newWSLink(ip, conn)
+	client := newWSLink(ctx, ip, conn)
 	s.addClient(client)
 	client.Start()
 	// The connection remains until the connection is lost or the link's

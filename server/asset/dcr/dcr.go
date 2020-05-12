@@ -23,7 +23,7 @@ import (
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/dcrutil/v2"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v2"
-	"github.com/decred/dcrd/rpcclient/v5"
+	"github.com/decred/dcrd/rpcclient/v6"
 	"github.com/decred/dcrd/wire"
 )
 
@@ -66,11 +66,11 @@ const (
 // satisfied by rpcclient.Client, and all methods are matches for Client
 // methods. For testing, it can be satisfied by a stub.
 type dcrNode interface {
-	GetTxOut(txHash *chainhash.Hash, index uint32, mempool bool) (*chainjson.GetTxOutResult, error)
-	GetRawTransactionVerbose(txHash *chainhash.Hash) (*chainjson.TxRawResult, error)
-	GetBlockVerbose(blockHash *chainhash.Hash, verboseTx bool) (*chainjson.GetBlockVerboseResult, error)
-	GetBlockHash(blockHeight int64) (*chainhash.Hash, error)
-	GetBestBlockHash() (*chainhash.Hash, error)
+	GetTxOut(ctx context.Context, txHash *chainhash.Hash, index uint32, mempool bool) (*chainjson.GetTxOutResult, error)
+	GetRawTransactionVerbose(ctx context.Context, txHash *chainhash.Hash) (*chainjson.TxRawResult, error)
+	GetBlockVerbose(ctx context.Context, blockHash *chainhash.Hash, verboseTx bool) (*chainjson.GetBlockVerboseResult, error)
+	GetBlockHash(ctx context.Context, blockHeight int64) (*chainhash.Hash, error)
+	GetBestBlockHash(context.Context) (*chainhash.Hash, error)
 }
 
 // Backend is an asset backend for Decred. It has methods for fetching UTXO
@@ -122,7 +122,7 @@ func NewBackend(ctx context.Context, configPath string, logger dex.Logger, netwo
 
 	// Ensure the network of the connected node is correct for the expected
 	// dex.Network.
-	net, err := dcr.client.GetCurrentNet()
+	net, err := dcr.client.GetCurrentNet(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("getcurrentnet failure: %v", err)
 	}
@@ -140,8 +140,9 @@ func NewBackend(ctx context.Context, configPath string, logger dex.Logger, netwo
 	}
 
 	dcr.node = dcr.client
+
 	// Prime the cache with the best block.
-	bestHash, _, err := dcr.client.GetBestBlock()
+	bestHash, _, err := dcr.client.GetBestBlock(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("error getting best block from dcrd: %v", err)
 	}
@@ -455,7 +456,7 @@ out:
 
 		case <-blockPoll.C:
 			tip := dcr.blockCache.tip()
-			bestHash, err := dcr.node.GetBestBlockHash()
+			bestHash, err := dcr.node.GetBestBlockHash(ctx)
 			if err != nil {
 				sendErr(asset.NewConnectionError("error retrieving best block: %v", err))
 				continue
@@ -465,7 +466,7 @@ out:
 			}
 
 			best := bestHash.String()
-			block, err := dcr.node.GetBlockVerbose(bestHash, false)
+			block, err := dcr.node.GetBlockVerbose(ctx, bestHash, false)
 			if err != nil {
 				sendErrFmt("error retrieving block %s: %v", best, err)
 				continue
@@ -491,7 +492,7 @@ out:
 				if *iHash == zeroHash {
 					break
 				}
-				iBlock, err := dcr.node.GetBlockVerbose(iHash, false)
+				iBlock, err := dcr.node.GetBlockVerbose(ctx, iHash, false)
 				if err != nil {
 					sendErrFmt("error retrieving block %s: %v", iHash, err)
 					break
@@ -662,7 +663,7 @@ func (dcr *Backend) utxo(ctx context.Context, txHash *chainhash.Hash, vout uint3
 
 // input gets the transaction input.
 func (dcr *Backend) input(ctx context.Context, txHash *chainhash.Hash, vin uint32) (*Input, error) {
-	verboseTx, err := dcr.node.GetRawTransactionVerbose(txHash)
+	verboseTx, err := dcr.node.GetRawTransactionVerbose(ctx, txHash)
 	if err != nil {
 		if isTxNotFoundErr(err) {
 			return nil, asset.CoinNotFoundError
@@ -699,8 +700,8 @@ func msgTxFromHex(txhex string) (*wire.MsgTx, error) {
 }
 
 // Get information for an unspent transaction output.
-func (dcr *Backend) getUnspentTxOut(_ context.Context, txHash *chainhash.Hash, vout uint32) (*chainjson.GetTxOutResult, []byte, error) {
-	txOut, err := dcr.node.GetTxOut(txHash, vout, true)
+func (dcr *Backend) getUnspentTxOut(ctx context.Context, txHash *chainhash.Hash, vout uint32) (*chainjson.GetTxOutResult, []byte, error) {
+	txOut, err := dcr.node.GetTxOut(ctx, txHash, vout, true)
 	if err != nil {
 		return nil, nil, fmt.Errorf("GetTxOut error for output %s:%d: %v", txHash, vout, err) // TODO: make RPC error type for client message sanitization
 	}
@@ -721,7 +722,7 @@ func (dcr *Backend) getTxOutInfo(ctx context.Context, txHash *chainhash.Hash, vo
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	verboseTx, err := dcr.node.GetRawTransactionVerbose(txHash)
+	verboseTx, err := dcr.node.GetRawTransactionVerbose(ctx, txHash)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("GetRawTransactionVerbose for txid %s: %v", txHash, err)
 	}
@@ -739,12 +740,12 @@ func (dcr *Backend) getBlockInfo(ctx context.Context, blockid string) (*dcrBlock
 }
 
 // Get the block information, checking the cache first.
-func (dcr *Backend) getDcrBlock(_ context.Context, blockHash *chainhash.Hash) (*dcrBlock, error) {
+func (dcr *Backend) getDcrBlock(ctx context.Context, blockHash *chainhash.Hash) (*dcrBlock, error) {
 	cachedBlock, found := dcr.blockCache.block(blockHash)
 	if found {
 		return cachedBlock, nil
 	}
-	blockVerbose, err := dcr.node.GetBlockVerbose(blockHash, false)
+	blockVerbose, err := dcr.node.GetBlockVerbose(ctx, blockHash, false)
 	if err != nil {
 		return nil, fmt.Errorf("error retrieving block %s: %v", blockHash, err)
 	}
@@ -757,7 +758,7 @@ func (dcr *Backend) getMainchainDcrBlock(ctx context.Context, height uint32) (*d
 	if found {
 		return cachedBlock, nil
 	}
-	hash, err := dcr.node.GetBlockHash(int64(height))
+	hash, err := dcr.node.GetBlockHash(ctx, int64(height))
 	if err != nil {
 		// Likely not mined yet. Not an error.
 		return nil, nil

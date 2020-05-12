@@ -49,7 +49,7 @@ type Signer interface {
 
 // FeeChecker is a function for retrieving the details for a fee payment. It
 // is satisfied by (dcr.Backend).UnspentCoinDetails.
-type FeeChecker func(coinID []byte) (addr string, val uint64, confs int64, err error)
+type FeeChecker func(ctx context.Context, coinID []byte) (addr string, val uint64, confs int64, err error)
 
 // A respHandler is the handler for the response to a DEX-originating request. A
 // respHandler has a time associated with it so that old unused handlers can be
@@ -241,8 +241,8 @@ func (auth *AuthManager) Run(ctx context.Context) {
 // Route wraps the comms.Route function, storing the response handler with the
 // associated clientInfo, and sending the message on the current comms.Link for
 // the client.
-func (auth *AuthManager) Route(route string, handler func(account.AccountID, *msgjson.Message) *msgjson.Error) {
-	comms.Route(route, func(conn comms.Link, msg *msgjson.Message) *msgjson.Error {
+func (auth *AuthManager) Route(route string, handler func(context.Context, account.AccountID, *msgjson.Message) *msgjson.Error) {
+	comms.Route(route, func(ctx context.Context, conn comms.Link, msg *msgjson.Message) *msgjson.Error {
 		client := auth.conn(conn)
 		if client == nil {
 			return &msgjson.Error{
@@ -250,7 +250,7 @@ func (auth *AuthManager) Route(route string, handler func(account.AccountID, *ms
 				Message: "cannot use route '" + route + "' on an unauthorized connection",
 			}
 		}
-		return handler(client.acct.ID, msg)
+		return handler(ctx, client.acct.ID, msg)
 	})
 }
 
@@ -375,7 +375,7 @@ func (auth *AuthManager) removeClient(client *clientInfo) {
 
 // handleConnect is the handler for the 'connect' route. The user is authorized,
 // a response is issued, and a clientInfo is created or updated.
-func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *msgjson.Error {
+func (auth *AuthManager) handleConnect(_ context.Context, conn comms.Link, msg *msgjson.Message) *msgjson.Error {
 	connect := new(msgjson.Connect)
 	err := json.Unmarshal(msg.Payload, &connect)
 	if err != nil {

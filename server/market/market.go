@@ -50,7 +50,7 @@ type Swapper interface {
 	Negotiate(matchSets []*order.MatchSet, offBook map[order.OrderID]bool)
 	LockCoins(asset uint32, coins map[order.OrderID][]order.CoinID)
 	LockOrdersCoins(orders []order.Order)
-	TxMonitored(user account.AccountID, asset uint32, txid string) bool
+	TxMonitored(ctx context.Context, user account.AccountID, asset uint32, txid string) bool
 }
 
 // Market is the market manager. It should not be overly involved with details
@@ -239,8 +239,8 @@ func (m *Market) SubmitOrder(rec *orderRecord) error {
 
 // TxMonitored checks if a user's transaction for a certain asset is being
 // monitored by the Swapper.
-func (m *Market) TxMonitored(user account.AccountID, asset uint32, txid string) bool {
-	return m.swapper.TxMonitored(user, asset, txid)
+func (m *Market) TxMonitored(ctx context.Context, user account.AccountID, asset uint32, txid string) bool {
+	return m.swapper.TxMonitored(ctx, user, asset, txid)
 }
 
 // SubmitOrderAsync submits a new order for inclusion into the current epoch.

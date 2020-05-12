@@ -16,7 +16,7 @@ import (
 	"github.com/decred/dcrd/dcrutil/v2"
 	"github.com/decred/dcrd/txscript/v2"
 	"github.com/decred/dcrd/wire"
-	"github.com/decred/dcrwallet/wallet/v3/txsizes"
+	"decred.org/dcrwallet/wallet/txsizes"
 )
 
 const (

@@ -171,7 +171,7 @@ func (dm *DEX) Stop() {
 	}
 }
 
-func (dm *DEX) handleDEXConfig(conn comms.Link, msg *msgjson.Message) *msgjson.Error {
+func (dm *DEX) handleDEXConfig(_ context.Context, conn comms.Link, msg *msgjson.Message) *msgjson.Error {
 	ack := &msgjson.Message{
 		Type:    msgjson.Response,
 		ID:      msg.ID,
@@ -196,7 +196,7 @@ func (dm *DEX) handleDEXConfig(conn comms.Link, msg *msgjson.Message) *msgjson.E
 //  7. Create and start the markets.
 //  8. Create and start the book router, and create the order router.
 //  9. Create and start the comms server.
-func NewDEX(cfg *DexConf) (*DEX, error) {
+func NewDEX(ctx context.Context, cfg *DexConf) (*DEX, error) {
 	// Disallow running without user penalization in a mainnet config.
 	if cfg.Anarchy && cfg.Network == dex.Mainnet {
 		return nil, fmt.Errorf("User penalties may not be disabled on mainnet.")
@@ -261,7 +261,7 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		// asset symbol must be available.
 		log.Infof("Starting asset backend %q...", symbol)
 		logger := cfg.LogBackend.SubLogger("ASSET", symbol)
-		be, err := asset.Setup(symbol, assetConf.ConfigPath, logger, cfg.Network)
+		be, err := asset.Setup(ctx, symbol, assetConf.ConfigPath, logger, cfg.Network)
 		if err != nil {
 			abort()
 			return nil, fmt.Errorf("failed to setup asset %q: %v", symbol, err)

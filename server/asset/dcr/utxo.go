@@ -52,7 +52,7 @@ func (txio *TXIO) confirmations(ctx context.Context, checkApproval bool) (int64,
 		// If the tip hasn't changed, don't do anything here.
 		if txio.lastLookup == nil || *txio.lastLookup != tipHash {
 			txio.lastLookup = &tipHash
-			verboseTx, err := txio.dcr.node.GetRawTransactionVerbose(&txio.tx.hash)
+			verboseTx, err := txio.dcr.node.GetRawTransactionVerbose(ctx, &txio.tx.hash)
 			if err != nil {
 				return -1, fmt.Errorf("GetRawTransactionVerbose for txid %s: %v", txio.tx.hash, err)
 			}
@@ -80,7 +80,7 @@ func (txio *TXIO) confirmations(ctx context.Context, checkApproval bool) (int64,
 			return -1, ErrReorgDetected
 		}
 		if mainchainBlock != nil && checkApproval {
-			nextBlock, err := dcr.getMainchainDcrBlock(ctx, txio.height + 1)
+			nextBlock, err := dcr.getMainchainDcrBlock(ctx, txio.height+1)
 			if err != nil {
 				return -1, fmt.Errorf("error retrieving approving block tx %s: %v", txio.tx.hash, err)
 			}

@@ -66,7 +66,7 @@ type MarketTunnel interface {
 	// TxMonitored determines whether the transaction for the given user is
 	// involved in a DEX-monitored trade. Change outputs from DEX-monitored trades
 	// can be used in other orders without waiting for fundConf confirmations.
-	TxMonitored(user account.AccountID, asset uint32, txid string) bool
+	TxMonitored(ctx context.Context, user account.AccountID, asset uint32, txid string) bool
 }
 
 // orderRecord contains the information necessary to respond to an order
@@ -570,7 +570,7 @@ func (r *OrderRouter) checkPrefixTrade(ctx context.Context, user account.Account
 		// Valid coins have either confs >= FundConf, or come from a
 		// DEX-monitored transaction.
 		if confs < int64(assets.funding.FundConf) &&
-			!tunnel.TxMonitored(user, assets.funding.ID, dexCoin.TxID()) {
+			!tunnel.TxMonitored(ctx, user, assets.funding.ID, dexCoin.TxID()) {
 			return errSet(msgjson.FundingError,
 				fmt.Sprintf("not enough confirmations for %v. require %d, have %d",
 					coin.ID, assets.funding.FundConf, confs))

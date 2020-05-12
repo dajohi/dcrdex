@@ -4,6 +4,7 @@
 package comms
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -52,11 +53,11 @@ type wsLink struct {
 }
 
 // newWSLink is a constructor for a new wsLink.
-func newWSLink(addr string, conn ws.Connection) *wsLink {
+func newWSLink(ctx context.Context, addr string, conn ws.Connection) *wsLink {
 	var c *wsLink
 	c = &wsLink{
 		WSLink: ws.NewWSLink(addr, conn, pingPeriod, func(msg *msgjson.Message) *msgjson.Error {
-			return handleMessage(c, msg)
+			return handleMessage(ctx, c, msg)
 		}),
 		respHandlers: make(map[uint64]*responseHandler),
 	}
@@ -73,7 +74,7 @@ func (c *wsLink) ID() uint64 {
 	return c.id
 }
 
-func handleMessage(c *wsLink, msg *msgjson.Message) *msgjson.Error {
+func handleMessage(ctx context.Context, c *wsLink, msg *msgjson.Message) *msgjson.Error {
 	switch msg.Type {
 	case msgjson.Request:
 		if msg.ID == 0 {
@@ -86,7 +87,7 @@ func handleMessage(c *wsLink, msg *msgjson.Message) *msgjson.Error {
 			return msgjson.NewError(msgjson.RPCUnknownRoute, "unknown route "+msg.Route)
 		}
 		// Handle the request.
-		rpcError := handler(c, msg)
+		rpcError := handler(ctx, c, msg)
 		if rpcError != nil {
 			return rpcError
 		}
