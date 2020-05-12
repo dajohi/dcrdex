@@ -11,8 +11,8 @@ import (
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/db/driver/pg/internal"
 	"github.com/decred/dcrd/chaincfg/chainhash"
-	"github.com/decred/dcrd/dcrutil/v2"
-	"github.com/decred/dcrd/hdkeychain/v2"
+	"github.com/decred/dcrd/dcrutil/v3"
+	"github.com/decred/dcrd/hdkeychain/v3"
 )
 
 // CloseAccount closes the account by setting the value of the rule column.
@@ -110,12 +110,8 @@ out:
 			return "", fmt.Errorf("error generating fee address")
 		}
 	}
-	pubKey, err := childExtKey.ECPubKey()
-	if err != nil {
-		log.Errorf("error getting PublicKey from child ExtendedKey: %v", err)
-		return "", fmt.Errorf("error creating fee address")
-	}
-	addr, err := dcrutil.NewAddressSecpPubKey(pubKey.Serialize(), a.keyParams)
+	pubKey := childExtKey.SerializedPubKey()
+	addr, err := dcrutil.NewAddressSecpPubKey(pubKey, a.keyParams)
 	if err != nil {
 		log.Errorf("error creating new AddressSecpPubKey: %v", err)
 		return "", fmt.Errorf("error encoding fee address")

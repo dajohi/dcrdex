@@ -28,11 +28,12 @@ import (
 	walletjson "decred.org/dcrwallet/rpc/jsonrpc/types"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/dcrec"
-	"github.com/decred/dcrd/dcrec/secp256k1/v2"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3/ecdsa"
 	"github.com/decred/dcrd/dcrutil/v3"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v2"
 	"github.com/decred/dcrd/rpcclient/v6"
-	"github.com/decred/dcrd/txscript/v2"
+	"github.com/decred/dcrd/txscript/v3"
 	"github.com/decred/dcrd/wire"
 )
 
@@ -787,10 +788,7 @@ func (dcr *ExchangeWallet) SignMessage(ctx context.Context, coin asset.Coin, msg
 	if err != nil {
 		return nil, nil, err
 	}
-	signature, err := priv.Sign(msg)
-	if err != nil {
-		return nil, nil, fmt.Errorf("signing error: %v", err)
-	}
+	signature := ecdsa.Sign(priv, msg)
 	pubkeys = append(pubkeys, pub.SerializeCompressed())
 	sigs = append(sigs, signature.Serialize())
 	return pubkeys, sigs, nil
@@ -1491,9 +1489,10 @@ func (dcr *ExchangeWallet) createSig(ctx context.Context, tx *wire.MsgTx, idx in
 	sigType := sigTyper.DSA()
 	switch sigType {
 	case dcrec.STEcdsaSecp256k1:
-		sig, err = txscript.RawTxInSignature(tx, idx, pkScript, txscript.SigHashAll, priv)
+		sig, err = txscript.RawTxInSignature(tx, idx, pkScript, txscript.SigHashAll, priv.Serialize(), dcrec.STEcdsaSecp256k1)
 	default:
-		sig, err = txscript.RawTxInSignatureAlt(tx, idx, pkScript, txscript.SigHashAll, priv, sigType)
+		//sig, err = txscript.RawTxInSignatureAlt(tx, idx, pkScript, txscript.SigHashAll, priv, sigType)
+		err = fmt.Errorf("unsupported signature type")
 	}
 	if err != nil {
 		return nil, nil, err
@@ -1509,8 +1508,8 @@ func (dcr *ExchangeWallet) getKeys(ctx context.Context, addr dcrutil.Address) (*
 		return nil, nil, err
 	}
 
-	priv, pub := secp256k1.PrivKeyFromBytes(wif.PrivKey())
-	return priv, pub, nil
+	priv := secp256k1.PrivKeyFromBytes(wif.PrivKey())
+	return priv, priv.PubKey(), nil
 }
 
 // monitorBlocks pings for new blocks and runs the tipChange callback function

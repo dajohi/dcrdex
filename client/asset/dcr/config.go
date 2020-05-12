@@ -10,8 +10,8 @@ import (
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/config"
-	"github.com/decred/dcrd/chaincfg/v2"
-	"github.com/decred/dcrd/dcrutil/v2"
+	"github.com/decred/dcrd/chaincfg/v3"
+	"github.com/decred/dcrd/dcrutil/v3"
 )
 
 const (
