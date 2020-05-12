@@ -462,7 +462,7 @@ func (w *TXCWallet) Swap(swap *asset.Swaps, _ *dex.Asset) ([]asset.Receipt, asse
 	return w.swapReceipts, &tCoin{id: []byte{0x0a, 0x0b}}, nil
 }
 
-func (w *TXCWallet) Redeem([]*asset.Redemption, *dex.Asset) ([]dex.Bytes, asset.Coin, error) {
+func (w *TXCWallet) Redeem(_ context.Context, []*asset.Redemption, *dex.Asset) ([]dex.Bytes, asset.Coin, error) {
 	return w.redeemCoins, &tCoin{id: []byte{0x0c, 0x0d}}, nil
 }
 

@@ -47,7 +47,7 @@ func (c *tCoin) Value() uint64 {
 	return 0
 }
 
-func (c *tCoin) Confirmations() (uint32, error) {
+func (c *tCoin) Confirmations(_ context.Context) (uint32, error) {
 	return c.confs, c.confsErr
 }
 

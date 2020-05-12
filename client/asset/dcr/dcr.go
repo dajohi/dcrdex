@@ -281,6 +281,7 @@ func NewWallet(_ context.Context, cfg *asset.WalletConfig, logger dex.Logger, ne
 	}
 	// Beyond this point, only node
 	dcr.node = dcr.client
+	dcr.walletNode = dcrwallet.NewClient(dcrwallet.RawRequestCaller(dcr.client), chainParams)
 
 	return dcr, nil
 }
@@ -369,7 +370,8 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (error, *sync.WaitGroup)
 // balance available for the exchange. Instead, all wallet UTXOs are scanned
 // for those that match DEX requirements. Part of the asset.Wallet interface.
 func (dcr *ExchangeWallet) Balance(ctx context.Context, confs uint32) (available, locked uint64, err error) {
-	unspents, err := dcr.walletNode.ListUnspentMin(ctx, 0)
+	var unspents []walletjson.ListUnspentResult
+	err = dcr.walletNode.Call(ctx, "listunspent", &unspents, 0)
 	if err != nil {
 		return 0, 0, err
 	}
