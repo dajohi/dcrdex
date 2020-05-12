@@ -28,8 +28,8 @@ type xcWallet struct {
 }
 
 // Unlock unlocks the wallet.
-func (w *xcWallet) Unlock(pw string, dur time.Duration) error {
-	err := w.Wallet.Unlock(pw, dur)
+func (w *xcWallet) Unlock(ctx context.Context, pw string, dur time.Duration) error {
+	err := w.Wallet.Unlock(ctx, pw, dur)
 	if err != nil {
 		return err
 	}
@@ -40,11 +40,11 @@ func (w *xcWallet) Unlock(pw string, dur time.Duration) error {
 }
 
 // Lock the wallet. The lockTime is zeroed so that unlocked will return false.
-func (w *xcWallet) Lock() error {
+func (w *xcWallet) Lock(ctx context.Context) error {
 	w.mtx.Lock()
 	w.lockTime = time.Time{}
 	w.mtx.Unlock()
-	return w.Wallet.Lock()
+	return w.Wallet.Lock(ctx)
 }
 
 // unlocked will return true if the lockTime has not passed.

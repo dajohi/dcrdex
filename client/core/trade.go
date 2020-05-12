@@ -5,6 +5,7 @@ package core
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -242,7 +243,7 @@ func (t *trackedTrade) readConnectMatches(msgMatches []*msgjson.Match) {
 // updates (UserMatch).Filled. Match negotiation can then be progressed by
 // calling (*trackedTrade).tick when a relevant event occurs, such as a request
 // from the DEX or a tip change. negotiate calls tick internally.
-func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
+func (t *trackedTrade) negotiate(ctx context.Context, msgMatches []*msgjson.Match) error {
 	t.mtx.Lock()
 	defer t.mtx.Unlock()
 	// Add the matches to the match map and update the database.
@@ -367,7 +368,7 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 		return fmt.Errorf("Failed to update order in db")
 	}
 
-	return t.tick()
+	return t.tick(ctx)
 }
 
 func (t *trackedTrade) metaOrder() *db.MetaOrder {
@@ -394,7 +395,7 @@ func (t *trackedTrade) processCancelMatch(msgMatch *msgjson.Match) error {
 
 // isSwappable will be true if the match is ready for a swap transaction to be
 // broadcast.
-func (t *trackedTrade) isSwappable(match *matchTracker) bool {
+func (t *trackedTrade) isSwappable(ctx context.Context, match *matchTracker) bool {
 	if match.failErr != nil {
 		return false
 	}
@@ -410,7 +411,7 @@ func (t *trackedTrade) isSwappable(match *matchTracker) bool {
 		// This might be ready to swap. Check the confirmations on the maker's
 		// swap.
 		coin := match.counterSwap.Coin()
-		confs, err := coin.Confirmations()
+		confs, err := coin.Confirmations(ctx)
 		if err != nil {
 			log.Errorf("error getting confirmations for match %s on order %s for coin %s",
 				match.id, t.UID(), coin)
@@ -432,7 +433,7 @@ func (t *trackedTrade) isSwappable(match *matchTracker) bool {
 
 // isRedeemable will be true if the match is ready for our redemption to be
 // broadcast.
-func (t *trackedTrade) isRedeemable(match *matchTracker) bool {
+func (t *trackedTrade) isRedeemable(ctx context.Context, match *matchTracker) bool {
 	if match.failErr != nil {
 		return false
 	}
@@ -445,7 +446,7 @@ func (t *trackedTrade) isRedeemable(match *matchTracker) bool {
 			return false
 		}
 		coin := match.counterSwap.Coin()
-		confs, err := coin.Confirmations()
+		confs, err := coin.Confirmations(ctx)
 		if err != nil {
 			log.Errorf("error getting confirmations for match %s on order %s for coin %s",
 				match.id, t.UID(), coin)
@@ -466,7 +467,7 @@ func (t *trackedTrade) isRedeemable(match *matchTracker) bool {
 }
 
 // tick will check for and perform any match actions necessary.
-func (t *trackedTrade) tick() error {
+func (t *trackedTrade) tick(ctx context.Context) error {
 	var swaps []*matchTracker
 	var redeems []*matchTracker
 
@@ -474,11 +475,11 @@ func (t *trackedTrade) tick() error {
 	defer t.matchMtx.Unlock()
 	var sent, quoteSent, received, quoteReceived uint64
 	for _, match := range t.matches {
-		if t.isSwappable(match) {
+		if t.isSwappable(ctx, match) {
 			swaps = append(swaps, match)
 			sent += match.Match.Quantity
 			quoteSent += calc.BaseToQuote(match.Match.Rate, match.Match.Quantity)
-		} else if t.isRedeemable(match) {
+		} else if t.isRedeemable(ctx, match) {
 			redeems = append(redeems, match)
 			received += match.Match.Quantity
 			quoteReceived += calc.BaseToQuote(match.Match.Rate, match.Match.Quantity)
@@ -490,7 +491,7 @@ func (t *trackedTrade) tick() error {
 		if !t.Trade().Sell {
 			qty = quoteSent
 		}
-		err := t.swapMatches(swaps)
+		err := t.swapMatches(ctx, swaps)
 		// swapMatches might modify the matches, so don't get the *Order for
 		// notifications before swapMatches.
 		corder, _ := t.coreOrderInternal()
@@ -513,7 +514,7 @@ func (t *trackedTrade) tick() error {
 		if t.Trade().Sell {
 			qty = quoteReceived
 		}
-		err := t.redeemMatches(redeems)
+		err := t.redeemMatches(ctx, redeems)
 		corder, _ := t.coreOrderInternal()
 		if err != nil {
 			log.Errorf("redeemMatches: %v", err)
@@ -532,7 +533,7 @@ func (t *trackedTrade) tick() error {
 
 // swapMatches will send a transaction with swap outputs for the specified
 // matches.
-func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
+func (t *trackedTrade) swapMatches(ctx context.Context, matches []*matchTracker) error {
 	errs := newErrorSet("swapMatches order %s - ", t.ID())
 	// Prepare the asset.Contracts.
 	swaps := new(asset.Swaps)
@@ -579,7 +580,7 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 	// Send the swap. If the swap fails, set the failErr flag for all matches.
 	// A more sophisticated solution might involve tracking the error time too
 	// and trying again in certain circumstances.
-	receipts, change, err := t.wallets.fromWallet.Swap(swaps, t.wallets.fromAsset)
+	receipts, change, err := t.wallets.fromWallet.Swap(ctx, swaps, t.wallets.fromAsset)
 	if err != nil {
 		// Set the error on the matches.
 		for _, match := range matches {
@@ -648,7 +649,7 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 }
 
 // redeemMatches will send a transaction redeeming the specified matches.
-func (t *trackedTrade) redeemMatches(matches []*matchTracker) error {
+func (t *trackedTrade) redeemMatches(ctx context.Context, matches []*matchTracker) error {
 	errs := newErrorSet("redeemMatches - order %s - ", t.ID())
 	// Collect a asset.Redemption for each match into a slice of redemptions that
 	// will be grouped into a single transaction.
@@ -662,7 +663,7 @@ func (t *trackedTrade) redeemMatches(matches []*matchTracker) error {
 
 	// Send the transaction.
 	redeemWallet, redeemAsset := t.wallets.toWallet, t.wallets.toAsset // this is our redeem
-	coinIDs, outCoin, err := redeemWallet.Redeem(redemptions, redeemAsset)
+	coinIDs, outCoin, err := redeemWallet.Redeem(ctx, redemptions, redeemAsset)
 	// If an error was encountered, fail all of the matches. A failed match will
 	// not run again on during ticks.
 	if err != nil {
@@ -730,7 +731,7 @@ func (t *trackedTrade) redeemMatches(matches []*matchTracker) error {
 }
 
 // processAudit processes the audit request from the server.
-func (t *trackedTrade) processAudit(msgID uint64, audit *msgjson.Audit) error {
+func (t *trackedTrade) processAudit(ctx context.Context, msgID uint64, audit *msgjson.Audit) error {
 	// Find the match and check the server's signature.
 	var mid order.MatchID
 	copy(mid[:], audit.MatchID)
@@ -758,7 +759,7 @@ func (t *trackedTrade) processAudit(msgID uint64, audit *msgjson.Audit) error {
 		Expiration: time.Now().Add(txWaitExpiration),
 		TryFunc: func() bool {
 			var err error
-			auditInfo, err = t.wallets.toWallet.AuditContract(audit.CoinID, audit.Contract)
+			auditInfo, err = t.wallets.toWallet.AuditContract(ctx, audit.CoinID, audit.Contract)
 			if err != nil {
 				if err == asset.CoinNotFoundError {
 					return wait.TryAgain

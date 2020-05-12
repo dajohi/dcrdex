@@ -1,6 +1,7 @@
 package asset
 
 import (
+	"context"
 	"fmt"
 	"sync"
 
@@ -14,7 +15,7 @@ var (
 
 // Driver is the interface required of all exchange wallets.
 type Driver interface {
-	Setup(*WalletConfig, dex.Logger, dex.Network) (Wallet, error)
+	Setup(context.Context, *WalletConfig, dex.Logger, dex.Network) (Wallet, error)
 	DecodeCoinID(coinID []byte) (string, error)
 	Info() *WalletInfo
 }
@@ -34,14 +35,14 @@ func Register(assetID uint32, driver Driver) {
 }
 
 // Setup sets up the asset, returning the exchange wallet.
-func Setup(assetID uint32, cfg *WalletConfig, logger dex.Logger, network dex.Network) (Wallet, error) {
+func Setup(ctx context.Context, assetID uint32, cfg *WalletConfig, logger dex.Logger, network dex.Network) (Wallet, error) {
 	driversMtx.Lock()
 	drv, ok := drivers[assetID]
 	driversMtx.Unlock()
 	if !ok {
 		return nil, fmt.Errorf("asset: unknown asset driver %d", assetID)
 	}
-	return drv.Setup(cfg, logger, network)
+	return drv.Setup(ctx, cfg, logger, network)
 }
 
 // DecodeCoinID creates a human-readable representation of a coin ID for a named
