@@ -4,6 +4,7 @@
 package asset
 
 import (
+	"context"
 	"fmt"
 
 	"decred.org/dcrdex/dex"
@@ -20,15 +21,15 @@ type Backend interface {
 	// Contract should return a Contract only for outputs that would be spendable
 	// on the blockchain immediately. The redeem script is required in order to
 	// calculate sigScript length and verify pubkeys.
-	Contract(coinID []byte, redeemScript []byte) (Contract, error)
+	Contract(ctx context.Context, coinID []byte, redeemScript []byte) (Contract, error)
 	// ValidateSecret checks that the secret satisfies the contract.
 	ValidateSecret(secret, contract []byte) bool
 	// Redemption returns the redemption at the specified location.
-	Redemption(redemptionID, contractID []byte) (Coin, error)
+	Redemption(ctx context.Context, redemptionID, contractID []byte) (Coin, error)
 	// FundingCoin returns the unspent coin at the specified location. Coins
 	// with non-standard pkScripts or scripts that require zero signatures to
 	// redeem must return an error.
-	FundingCoin(coinID []byte, redeemScript []byte) (FundingCoin, error)
+	FundingCoin(ctx context.Context, coinID []byte, redeemScript []byte) (FundingCoin, error)
 	// BlockChannel creates and returns a new channel on which to receive updates
 	// when new blocks are connected.
 	BlockChannel(size int) <-chan *BlockUpdate
@@ -55,7 +56,7 @@ type Coin interface {
 	// should have zero confirmations. A transaction in the current best block
 	// should have one confirmation. A negative number can be returned if error
 	// is not nil.
-	Confirmations() (int64, error)
+	Confirmations(context.Context) (int64, error)
 	// ID is the coin ID.
 	ID() []byte
 	// TxID is a transaction identifier for the coin.

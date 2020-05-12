@@ -5,6 +5,7 @@ package dcr
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 
 	"decred.org/dcrdex/dex"
@@ -43,7 +44,7 @@ type TXIO struct {
 // tx is no longer ready to spend. An unmined transaction should have zero
 // confirmations. A transaction in the current best block should have one
 // confirmation. The value -1 will be returned with any error.
-func (txio *TXIO) confirmations(checkApproval bool) (int64, error) {
+func (txio *TXIO) confirmations(ctx context.Context, checkApproval bool) (int64, error) {
 	dcr := txio.dcr
 	tipHash := dcr.blockCache.tipHash()
 	// If the tx was in a mempool transaction, check if it has been confirmed.
@@ -58,7 +59,7 @@ func (txio *TXIO) confirmations(checkApproval bool) (int64, error) {
 			// More than zero confirmations would indicate that the transaction has
 			// been mined. Collect the block info and update the tx fields.
 			if verboseTx.Confirmations > 0 {
-				blk, err := txio.dcr.getBlockInfo(verboseTx.BlockHash)
+				blk, err := txio.dcr.getBlockInfo(ctx, verboseTx.BlockHash)
 				if err != nil {
 					return -1, err
 				}
@@ -79,7 +80,7 @@ func (txio *TXIO) confirmations(checkApproval bool) (int64, error) {
 			return -1, ErrReorgDetected
 		}
 		if mainchainBlock != nil && checkApproval {
-			nextBlock, err := dcr.getMainchainDcrBlock(txio.height + 1)
+			nextBlock, err := dcr.getMainchainDcrBlock(ctx, txio.height + 1)
 			if err != nil {
 				return -1, fmt.Errorf("error retrieving approving block tx %s: %v", txio.tx.hash, err)
 			}
@@ -129,15 +130,15 @@ func (input *Input) String() string {
 
 // Confirmations returns the number of confirmations on this input's
 // transaction.
-func (input *Input) Confirmations() (int64, error) {
-	confs, err := input.confirmations(false)
+func (input *Input) Confirmations(ctx context.Context) (int64, error) {
+	confs, err := input.confirmations(ctx, false)
 	if err == ErrReorgDetected {
-		newInput, err := input.dcr.input(&input.tx.hash, input.vin)
+		newInput, err := input.dcr.input(ctx, &input.tx.hash, input.vin)
 		if err != nil {
 			return -1, fmt.Errorf("input block is not mainchain")
 		}
 		*input = *newInput
-		return input.Confirmations()
+		return input.Confirmations(ctx)
 	}
 	return confs, err
 }
@@ -204,16 +205,16 @@ func (utxo *UTXO) String() string {
 // validity should not be confused with the validity of regular tree
 // transactions that is voted on by stakeholders. While stakeholder approval is
 // a part of UTXO validity, there are other considerations as well.
-func (utxo *UTXO) Confirmations() (int64, error) {
-	confs, err := utxo.confirmations(!utxo.scriptType.IsStake())
+func (utxo *UTXO) Confirmations(ctx context.Context) (int64, error) {
+	confs, err := utxo.confirmations(ctx, !utxo.scriptType.IsStake())
 	if err == ErrReorgDetected {
 		// See if we can find the utxo in another block.
-		newUtxo, err := utxo.dcr.utxo(&utxo.tx.hash, utxo.vout, utxo.redeemScript)
+		newUtxo, err := utxo.dcr.utxo(ctx, &utxo.tx.hash, utxo.vout, utxo.redeemScript)
 		if err != nil {
 			return -1, fmt.Errorf("utxo block is not mainchain")
 		}
 		*utxo = *newUtxo
-		return utxo.Confirmations()
+		return utxo.Confirmations(ctx)
 	}
 	return confs, err
 }

@@ -24,6 +24,8 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
 	dexdcr "decred.org/dcrdex/dex/dcr"
+	"decred.org/dcrwallet/rpc/client/dcrwallet"
+	walletjson "decred.org/dcrwallet/rpc/jsonrpc/types"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/dcrec"
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
@@ -32,8 +34,6 @@ import (
 	"github.com/decred/dcrd/rpcclient/v6"
 	"github.com/decred/dcrd/txscript/v2"
 	"github.com/decred/dcrd/wire"
-	walletjson "decred.org/dcrwallet/rpc/jsonrpc/types"
-	"decred.org/dcrwallet/rpc/client/dcrwallet"
 )
 
 const (
@@ -66,15 +66,15 @@ type rpcClient interface {
 }
 
 type walletClient interface {
- DumpPrivKey(ctx context.Context, address dcrutil.Address, net [2]byte) (*dcrutil.WIF, error)
-   GetNewAddressGapPolicy(context.Context, string, dcrwallet.GapPolicy, dcrutil.AddressParams) (dcrutil.Address, error)
-        GetRawChangeAddress(ctx context.Context, account string, net dcrutil.AddressParams) (dcrutil.Address, error)
-        GetTransaction(ctx context.Context, txHash *chainhash.Hash) (*walletjson.GetTransactionResult, error)
-        ListUnspentMin(minConf int) ([]walletjson.ListUnspentResult, error)
-        LockUnspent(unlock bool, ops []*wire.OutPoint) error
-        SignRawTransaction(ctx context.Context, tx *wire.MsgTx) (*wire.MsgTx, bool, error)
-        WalletLock(context.Context) error
-        WalletPassphrase(ctx context.Context, passphrase string, timeoutSecs int64) error
+	DumpPrivKey(ctx context.Context, address dcrutil.Address, net [2]byte) (*dcrutil.WIF, error)
+	GetNewAddressGapPolicy(context.Context, string, dcrwallet.GapPolicy, dcrutil.AddressParams) (dcrutil.Address, error)
+	GetRawChangeAddress(ctx context.Context, account string, net dcrutil.AddressParams) (dcrutil.Address, error)
+	GetTransaction(ctx context.Context, txHash *chainhash.Hash) (*walletjson.GetTransactionResult, error)
+	ListUnspentMin(minConf int) ([]walletjson.ListUnspentResult, error)
+	LockUnspent(unlock bool, ops []*wire.OutPoint) error
+	SignRawTransaction(ctx context.Context, tx *wire.MsgTx) (*wire.MsgTx, bool, error)
+	WalletLock(context.Context) error
+	WalletPassphrase(ctx context.Context, passphrase string, timeoutSecs int64) error
 }
 
 // outpointID creates a unique string for a transaction output.
@@ -234,7 +234,7 @@ func init() {
 // satisfies the dex.Wallet interface.
 type ExchangeWallet struct {
 	client       *rpcclient.Client
-	walletNode	*dcrwallet.Client
+	walletNode   *dcrwallet.Client
 	node         rpcClient
 	log          dex.Logger
 	acct         string

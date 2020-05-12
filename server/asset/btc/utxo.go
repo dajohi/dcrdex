@@ -5,6 +5,7 @@ package btc
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"fmt"
 
@@ -119,7 +120,7 @@ func (input *Input) String() string {
 
 // Confirmations returns the number of confirmations on this input's
 // transaction.
-func (input *Input) Confirmations() (int64, error) {
+func (input *Input) Confirmations(ctx context.Context) (int64, error) {
 	confs, err := input.confirmations()
 	if err == ErrReorgDetected {
 		newInput, err := input.btc.input(&input.tx.hash, input.vin)
@@ -127,7 +128,7 @@ func (input *Input) Confirmations() (int64, error) {
 			return -1, fmt.Errorf("input block is not mainchain")
 		}
 		*input = *newInput
-		return input.Confirmations()
+		return input.Confirmations(ctx)
 	}
 	return confs, err
 }
@@ -193,7 +194,7 @@ func (utxo *UTXO) String() string {
 // UTXO is no longer ready to spend. An unmined transaction should have zero
 // confirmations. A transaction in the current best block should have one
 // confirmation. The value -1 will be returned with any error.
-func (utxo *UTXO) Confirmations() (int64, error) {
+func (utxo *UTXO) Confirmations(ctx context.Context) (int64, error) {
 	confs, err := utxo.confirmations()
 	if err == ErrReorgDetected {
 		// See if we can find the utxo in another block.
@@ -202,7 +203,7 @@ func (utxo *UTXO) Confirmations() (int64, error) {
 			return -1, fmt.Errorf("utxo block is not mainchain")
 		}
 		*utxo = *newUtxo
-		return utxo.Confirmations()
+		return utxo.Confirmations(ctx)
 	}
 	return confs, err
 }

@@ -31,8 +31,8 @@ import (
 type Driver struct{}
 
 // Setup creates the DCR backend. Start the backend with its Run method.
-func (d *Driver) Setup(configPath string, logger dex.Logger, network dex.Network) (asset.Backend, error) {
-	return NewBackend(configPath, logger, network)
+func (d *Driver) Setup(ctx context.Context, configPath string, logger dex.Logger, network dex.Network) (asset.Backend, error) {
+	return NewBackend(ctx, configPath, logger, network)
 }
 
 // DecodeCoinID creates a human-readable representation of a coin ID for Decred.
@@ -104,7 +104,7 @@ var _ asset.Backend = (*Backend)(nil)
 // application exits. If configPath is an empty string, the backend will
 // attempt to read the settings directly from the dcrd config file in its
 // default system location.
-func NewBackend(configPath string, logger dex.Logger, network dex.Network) (*Backend, error) {
+func NewBackend(ctx context.Context, configPath string, logger dex.Logger, network dex.Network) (*Backend, error) {
 	// loadConfig will set fields if defaults are used and set the chainParams
 	// package variable.
 	cfg, err := loadConfig(configPath, network)
@@ -146,7 +146,7 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (*Bac
 		return nil, fmt.Errorf("error getting best block from dcrd: %v", err)
 	}
 	if bestHash != nil {
-		_, err := dcr.getDcrBlock(bestHash)
+		_, err := dcr.getDcrBlock(ctx, bestHash)
 		if err != nil {
 			return nil, fmt.Errorf("error priming the cache: %v", err)
 		}
@@ -179,12 +179,12 @@ func (dcr *Backend) BlockChannel(size int) <-chan *asset.BlockUpdate {
 // Pubkey scripts can be P2PKH or P2SH in either regular- or stake-tree flavor.
 // P2PKH supports two alternative signatures, Schnorr and Edwards. Multi-sig
 // P2SH redeem scripts are supported as well.
-func (dcr *Backend) Contract(coinID []byte, redeemScript []byte) (asset.Contract, error) {
+func (dcr *Backend) Contract(ctx context.Context, coinID []byte, redeemScript []byte) (asset.Contract, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding coin ID %x: %v", coinID, err)
 	}
-	utxo, err := dcr.utxo(txHash, vout, redeemScript)
+	utxo, err := dcr.utxo(ctx, txHash, vout, redeemScript)
 	if err != nil {
 		return nil, err
 	}
@@ -207,12 +207,12 @@ func (dcr *Backend) ValidateSecret(secret, contract []byte) bool {
 }
 
 // Redemption is an input that redeems a swap contract.
-func (dcr *Backend) Redemption(redemptionID, contractID []byte) (asset.Coin, error) {
+func (dcr *Backend) Redemption(ctx context.Context, redemptionID, contractID []byte) (asset.Coin, error) {
 	txHash, vin, err := decodeCoinID(redemptionID)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding redemption coin ID %x: %v", txHash, err)
 	}
-	input, err := dcr.input(txHash, vin)
+	input, err := dcr.input(ctx, txHash, vin)
 	if err != nil {
 		return nil, err
 	}
@@ -227,12 +227,12 @@ func (dcr *Backend) Redemption(redemptionID, contractID []byte) (asset.Coin, err
 }
 
 // FundingCoin is an unspent output.
-func (dcr *Backend) FundingCoin(coinID []byte, redeemScript []byte) (asset.FundingCoin, error) {
+func (dcr *Backend) FundingCoin(ctx context.Context, coinID []byte, redeemScript []byte) (asset.FundingCoin, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding coin ID %x: %v", coinID, err)
 	}
-	utxo, err := dcr.utxo(txHash, vout, redeemScript)
+	utxo, err := dcr.utxo(ctx, txHash, vout, redeemScript)
 	if err != nil {
 		return nil, err
 	}
@@ -267,24 +267,24 @@ func (dcr *Backend) CheckAddress(addr string) bool {
 // UnspentCoinDetails gets the recipient address, value, and confirmations of
 // unspent coins. For DCR, this corresponds to a UTXO. If the utxo does not
 // exist or has a pubkey script of the wrong type, an error will be returned.
-func (dcr *Backend) UnspentCoinDetails(coinID []byte) (addr string, val uint64, confs int64, err error) {
+func (dcr *Backend) UnspentCoinDetails(ctx context.Context, coinID []byte) (addr string, val uint64, confs int64, err error) {
 	txHash, vout, errCoin := decodeCoinID(coinID)
 	if errCoin != nil {
 		err = fmt.Errorf("error decoding coin ID %x: %v", coinID, errCoin)
 		return
 	}
-	return dcr.UTXODetails(txHash.String(), vout)
+	return dcr.UTXODetails(ctx, txHash.String(), vout)
 }
 
 // UTXODetails gets the recipient address, value, and confs of an unspent
 // P2PKH transaction output. If the utxo does not exist or has a pubkey script
 // of the wrong type, an error will be returned.
-func (dcr *Backend) UTXODetails(txid string, vout uint32) (string, uint64, int64, error) {
+func (dcr *Backend) UTXODetails(ctx context.Context, txid string, vout uint32) (string, uint64, int64, error) {
 	txHash, err := chainhash.NewHashFromStr(txid)
 	if err != nil {
 		return "", 0, -1, fmt.Errorf("error decoding tx ID %s: %v", txid, err)
 	}
-	txOut, pkScript, err := dcr.getUnspentTxOut(txHash, vout)
+	txOut, pkScript, err := dcr.getUnspentTxOut(ctx, txHash, vout)
 	if err != nil {
 		return "", 0, -1, err
 	}
@@ -316,7 +316,7 @@ func (dcr *Backend) UTXODetails(txid string, vout uint32) (string, uint64, int64
 
 // Get the Tx. Transaction info is not cached, so every call will result in a
 // GetRawTransactionVerbose RPC call.
-func (dcr *Backend) transaction(txHash *chainhash.Hash, verboseTx *chainjson.TxRawResult) (*Tx, error) {
+func (dcr *Backend) transaction(ctx context.Context, txHash *chainhash.Hash, verboseTx *chainjson.TxRawResult) (*Tx, error) {
 	// Figure out if it's a stake transaction
 	msgTx, err := msgTxFromHex(verboseTx.Hex)
 	if err != nil {
@@ -338,7 +338,7 @@ func (dcr *Backend) transaction(txHash *chainhash.Hash, verboseTx *chainjson.TxR
 			return nil, fmt.Errorf("error decoding block hash %s for tx %s: %v", verboseTx.BlockHash, txHash, err)
 		}
 		// Make sure the block info is cached.
-		_, err := dcr.getDcrBlock(blockHash)
+		_, err := dcr.getDcrBlock(ctx, blockHash)
 		if err != nil {
 			return nil, fmt.Errorf("error caching the block data for transaction %s", txHash)
 		}
@@ -537,8 +537,8 @@ out:
 // output's pkScript, and if the provided redeemScript is not empty, verifying
 // that the pkScript is a P2SH with a script hash to which the redeem script
 // hashes. This also screens out multi-sig scripts.
-func (dcr *Backend) validateTxOut(txHash *chainhash.Hash, vout uint32, redeemScript []byte) error {
-	_, pkScript, err := dcr.getUnspentTxOut(txHash, vout)
+func (dcr *Backend) validateTxOut(ctx context.Context, txHash *chainhash.Hash, vout uint32, redeemScript []byte) error {
+	_, pkScript, err := dcr.getUnspentTxOut(ctx, txHash, vout)
 	if err != nil {
 		return err
 	}
@@ -570,7 +570,7 @@ func (dcr *Backend) validateTxOut(txHash *chainhash.Hash, vout uint32, redeemScr
 
 // blockInfo returns block information for the verbose transaction data. The
 // current tip hash is also returned as a convenience.
-func (dcr *Backend) blockInfo(verboseTx *chainjson.TxRawResult) (blockHeight uint32, blockHash chainhash.Hash, tipHash *chainhash.Hash, err error) {
+func (dcr *Backend) blockInfo(ctx context.Context, verboseTx *chainjson.TxRawResult) (blockHeight uint32, blockHash chainhash.Hash, tipHash *chainhash.Hash, err error) {
 	blockHeight = uint32(verboseTx.BlockHeight)
 	tip := dcr.blockCache.tipHash()
 	if tip != zeroHash {
@@ -584,7 +584,7 @@ func (dcr *Backend) blockInfo(verboseTx *chainjson.TxRawResult) (blockHeight uin
 			return
 		}
 		var blk *dcrBlock
-		blk, err = dcr.getBlockInfo(verboseTx.BlockHash)
+		blk, err = dcr.getBlockInfo(ctx, verboseTx.BlockHash)
 		if err != nil {
 			return
 		}
@@ -595,8 +595,8 @@ func (dcr *Backend) blockInfo(verboseTx *chainjson.TxRawResult) (blockHeight uin
 }
 
 // Get the UTXO, populating the block data along the way.
-func (dcr *Backend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []byte) (*UTXO, error) {
-	txOut, verboseTx, pkScript, err := dcr.getTxOutInfo(txHash, vout)
+func (dcr *Backend) utxo(ctx context.Context, txHash *chainhash.Hash, vout uint32, redeemScript []byte) (*UTXO, error) {
+	txOut, verboseTx, pkScript, err := dcr.getTxOutInfo(ctx, txHash, vout)
 	if err != nil {
 		return nil, err
 	}
@@ -619,7 +619,7 @@ func (dcr *Backend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []byt
 		}
 	}
 
-	blockHeight, blockHash, lastLookup, err := dcr.blockInfo(verboseTx)
+	blockHeight, blockHash, lastLookup, err := dcr.blockInfo(ctx, verboseTx)
 	if err != nil {
 		return nil, err
 	}
@@ -634,7 +634,7 @@ func (dcr *Backend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []byt
 		return nil, immatureTransactionError
 	}
 
-	tx, err := dcr.transaction(txHash, verboseTx)
+	tx, err := dcr.transaction(ctx, txHash, verboseTx)
 	if err != nil {
 		return nil, fmt.Errorf("error fetching verbose transaction data: %v", err)
 	}
@@ -661,7 +661,7 @@ func (dcr *Backend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []byt
 }
 
 // input gets the transaction input.
-func (dcr *Backend) input(txHash *chainhash.Hash, vin uint32) (*Input, error) {
+func (dcr *Backend) input(ctx context.Context, txHash *chainhash.Hash, vin uint32) (*Input, error) {
 	verboseTx, err := dcr.node.GetRawTransactionVerbose(txHash)
 	if err != nil {
 		if isTxNotFoundErr(err) {
@@ -669,11 +669,11 @@ func (dcr *Backend) input(txHash *chainhash.Hash, vin uint32) (*Input, error) {
 		}
 		return nil, fmt.Errorf("GetRawTransactionVerbose for txid %s: %v", txHash, err)
 	}
-	tx, err := dcr.transaction(txHash, verboseTx)
+	tx, err := dcr.transaction(ctx, txHash, verboseTx)
 	if err != nil {
 		return nil, fmt.Errorf("error fetching verbose transaction data: %v", err)
 	}
-	blockHeight, blockHash, lastLookup, err := dcr.blockInfo(verboseTx)
+	blockHeight, blockHash, lastLookup, err := dcr.blockInfo(ctx, verboseTx)
 	if err != nil {
 		return nil, err
 	}
@@ -699,7 +699,7 @@ func msgTxFromHex(txhex string) (*wire.MsgTx, error) {
 }
 
 // Get information for an unspent transaction output.
-func (dcr *Backend) getUnspentTxOut(txHash *chainhash.Hash, vout uint32) (*chainjson.GetTxOutResult, []byte, error) {
+func (dcr *Backend) getUnspentTxOut(_ context.Context, txHash *chainhash.Hash, vout uint32) (*chainjson.GetTxOutResult, []byte, error) {
 	txOut, err := dcr.node.GetTxOut(txHash, vout, true)
 	if err != nil {
 		return nil, nil, fmt.Errorf("GetTxOut error for output %s:%d: %v", txHash, vout, err) // TODO: make RPC error type for client message sanitization
@@ -716,8 +716,8 @@ func (dcr *Backend) getUnspentTxOut(txHash *chainhash.Hash, vout uint32) (*chain
 
 // Get information for an unspent transaction output, plus the verbose
 // transaction.
-func (dcr *Backend) getTxOutInfo(txHash *chainhash.Hash, vout uint32) (*chainjson.GetTxOutResult, *chainjson.TxRawResult, []byte, error) {
-	txOut, pkScript, err := dcr.getUnspentTxOut(txHash, vout)
+func (dcr *Backend) getTxOutInfo(ctx context.Context, txHash *chainhash.Hash, vout uint32) (*chainjson.GetTxOutResult, *chainjson.TxRawResult, []byte, error) {
+	txOut, pkScript, err := dcr.getUnspentTxOut(ctx, txHash, vout)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -730,16 +730,16 @@ func (dcr *Backend) getTxOutInfo(txHash *chainhash.Hash, vout uint32) (*chainjso
 
 // Get the block information, checking the cache first. Same as
 // getDcrBlock, but takes a string argument.
-func (dcr *Backend) getBlockInfo(blockid string) (*dcrBlock, error) {
+func (dcr *Backend) getBlockInfo(ctx context.Context, blockid string) (*dcrBlock, error) {
 	blockHash, err := chainhash.NewHashFromStr(blockid)
 	if err != nil {
 		return nil, fmt.Errorf("unable to decode block hash from %s", blockid)
 	}
-	return dcr.getDcrBlock(blockHash)
+	return dcr.getDcrBlock(ctx, blockHash)
 }
 
 // Get the block information, checking the cache first.
-func (dcr *Backend) getDcrBlock(blockHash *chainhash.Hash) (*dcrBlock, error) {
+func (dcr *Backend) getDcrBlock(_ context.Context, blockHash *chainhash.Hash) (*dcrBlock, error) {
 	cachedBlock, found := dcr.blockCache.block(blockHash)
 	if found {
 		return cachedBlock, nil
@@ -752,7 +752,7 @@ func (dcr *Backend) getDcrBlock(blockHash *chainhash.Hash) (*dcrBlock, error) {
 }
 
 // Get the mainchain block at the given height, checking the cache first.
-func (dcr *Backend) getMainchainDcrBlock(height uint32) (*dcrBlock, error) {
+func (dcr *Backend) getMainchainDcrBlock(ctx context.Context, height uint32) (*dcrBlock, error) {
 	cachedBlock, found := dcr.blockCache.atHeight(height)
 	if found {
 		return cachedBlock, nil
@@ -762,7 +762,7 @@ func (dcr *Backend) getMainchainDcrBlock(height uint32) (*dcrBlock, error) {
 		// Likely not mined yet. Not an error.
 		return nil, nil
 	}
-	return dcr.getDcrBlock(hash)
+	return dcr.getDcrBlock(ctx, hash)
 }
 
 // connectNodeRPC attempts to create a new websocket connection to a dcrd node

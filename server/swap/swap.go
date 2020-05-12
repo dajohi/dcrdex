@@ -39,7 +39,7 @@ func unixMsNow() time.Time {
 // The AuthManager handles client-related actions, including authorization and
 // communications.
 type AuthManager interface {
-	Route(string, func(account.AccountID, *msgjson.Message) *msgjson.Error)
+	Route(string, func(context.Context, account.AccountID, *msgjson.Message) *msgjson.Error)
 	Auth(user account.AccountID, msg, sig []byte) error
 	Sign(...msgjson.Signable) error
 	Send(account.AccountID, *msgjson.Message)
@@ -376,7 +376,7 @@ out:
 			}
 			bcastTriggers = append(bcastTriggers, block)
 			// processBlock will update confirmation times in the swapStatus structs.
-			s.processBlock(block)
+			s.processBlock(ctxSwap, block)
 		case <-bcastTicker.C:
 			for {
 				// checkInaction will fail if the DB is failing. TODO: Consider
@@ -414,13 +414,13 @@ out:
 	wg.Wait()
 }
 
-func (s *Swapper) tryConfirmSwap(status *swapStatus) {
+func (s *Swapper) tryConfirmSwap(ctx context.Context, status *swapStatus) {
 	status.mtx.Lock()
 	defer status.mtx.Unlock()
 	if status.swapTime.IsZero() || !status.swapConfirmed.IsZero() {
 		return
 	}
-	confs, err := status.swap.Confirmations()
+	confs, err := status.swap.Confirmations(ctx)
 	if err != nil {
 		// The transaction has become invalid. No reason to do anything.
 		return
@@ -438,7 +438,7 @@ func (s *Swapper) tryConfirmSwap(status *swapStatus) {
 // broadcast the next transaction in the settlement sequence. The timeout is
 // not evaluated here, but in (Swapper).checkInaction. This method simply sets
 // the appropriate flags in the swapStatus structures.
-func (s *Swapper) processBlock(block *blockNotification) {
+func (s *Swapper) processBlock(ctx context.Context, block *blockNotification) {
 	var completions []*matchTracker
 	s.matchMtx.Lock()
 	defer s.matchMtx.Unlock()
@@ -461,7 +461,7 @@ func (s *Swapper) processBlock(block *blockNotification) {
 			}
 			// If the maker has broadcast their transaction, the taker's broadcast
 			// timeout starts once the maker's swap has SwapConf confs.
-			s.tryConfirmSwap(match.makerStatus)
+			s.tryConfirmSwap(ctx, match.makerStatus)
 		case order.TakerSwapCast:
 			if match.takerStatus.swapAsset != block.assetID {
 				break statusSwitch
@@ -469,14 +469,14 @@ func (s *Swapper) processBlock(block *blockNotification) {
 			// If the taker has broadcast their transaction, the maker's broadcast
 			// timeout (for redemption) starts once the maker's swap has SwapConf
 			// confs.
-			s.tryConfirmSwap(match.takerStatus)
+			s.tryConfirmSwap(ctx, match.takerStatus)
 		case order.MakerRedeemed:
 			// It's the taker's turn to redeem. Nothing to do here.
 			break statusSwitch
 		case order.MatchComplete:
 			// Once both redemption transactions have SwapConf confirmations, the
 			// order is complete.
-			makerRedeemed, takerRedeemed := s.RedeemStatus(match.makerStatus, match.takerStatus)
+			makerRedeemed, takerRedeemed := s.RedeemStatus(ctx, match.makerStatus, match.takerStatus)
 			// TODO: Can coins be unlocked now regardless of redemption?
 			if makerRedeemed && takerRedeemed {
 				completions = append(completions, match)
@@ -506,23 +506,23 @@ func (s *Swapper) processBlock(block *blockNotification) {
 }
 
 // RedeemStatus checks maker and taker redemption completion status.
-func (s *Swapper) RedeemStatus(mStatus, tStatus *swapStatus) (makerRedeemComplete, takerRedeemComplete bool) {
+func (s *Swapper) RedeemStatus(ctx context.Context, mStatus, tStatus *swapStatus) (makerRedeemComplete, takerRedeemComplete bool) {
 	mStatus.mtx.RLock()
 	defer mStatus.mtx.RUnlock()
 	tStatus.mtx.RLock()
 	defer tStatus.mtx.RUnlock()
 
-	return s.redeemStatus(mStatus, tStatus)
+	return s.redeemStatus(ctx, mStatus, tStatus)
 }
 
 // redeemStatus is not thread-safe with respect to the swapStatuses. The caller
 // must lock each swapStatus to guard concurrent status access.
-func (s *Swapper) redeemStatus(mStatus, tStatus *swapStatus) (makerRedeemComplete, takerRedeemComplete bool) {
-	makerRedeemComplete = s.makerRedeemStatus(mStatus, tStatus.swapAsset)
+func (s *Swapper) redeemStatus(ctx context.Context, mStatus, tStatus *swapStatus) (makerRedeemComplete, takerRedeemComplete bool) {
+	makerRedeemComplete = s.makerRedeemStatus(ctx, mStatus, tStatus.swapAsset)
 	// Taker is only complete if the maker is complete because
 	// order.MatchComplete follows order.MakerRedeemed.
 	if makerRedeemComplete && !tStatus.redeemTime.IsZero() {
-		confs, err := tStatus.redemption.Confirmations()
+		confs, err := tStatus.redemption.Confirmations(ctx)
 		if err != nil {
 			log.Errorf("Confirmations failed for taker redemption %v: err",
 				tStatus.redemption.TxID(), err)
@@ -535,18 +535,18 @@ func (s *Swapper) redeemStatus(mStatus, tStatus *swapStatus) (makerRedeemComplet
 
 // MakerRedeemStatus checks maker redemption completion status The taker asset
 // is required to check the confirmation requirement.
-func (s *Swapper) MakerRedeemStatus(mStatus *swapStatus, tAsset uint32) (makerRedeemComplete bool) {
+func (s *Swapper) MakerRedeemStatus(ctx context.Context, mStatus *swapStatus, tAsset uint32) (makerRedeemComplete bool) {
 	mStatus.mtx.RLock()
 	defer mStatus.mtx.RUnlock()
 
-	return s.makerRedeemStatus(mStatus, tAsset)
+	return s.makerRedeemStatus(ctx, mStatus, tAsset)
 }
 
 // makerRedeemStatus is not thread-safe with respect to the swapStatus. The
 // caller must lock the swapStatus to guard concurrent status access.
-func (s *Swapper) makerRedeemStatus(mStatus *swapStatus, tAsset uint32) (makerRedeemComplete bool) {
+func (s *Swapper) makerRedeemStatus(ctx context.Context, mStatus *swapStatus, tAsset uint32) (makerRedeemComplete bool) {
 	if !mStatus.redeemTime.IsZero() {
-		confs, err := mStatus.redemption.Confirmations()
+		confs, err := mStatus.redemption.Confirmations(ctx)
 		if err != nil {
 			log.Errorf("Confirmations failed for maker redemption %v: err",
 				mStatus.redemption.TxID(), err) // Severity?
@@ -563,7 +563,7 @@ func (s *Swapper) makerRedeemStatus(mStatus *swapStatus, tAsset uint32) (makerRe
 // change outputs from a dex-monitored swap contract to be used to fund
 // additional swaps prior to FundConf. e.g. OrderRouter may allow coins to fund
 // orders where: (coins.confs >= FundConf) OR TxMonitored(coins.tx).
-func (s *Swapper) TxMonitored(user account.AccountID, asset uint32, txid string) bool {
+func (s *Swapper) TxMonitored(ctx context.Context, user account.AccountID, asset uint32, txid string) bool {
 
 	checkMatch := func(match *matchTracker) bool {
 		// Both maker and taker statuses must be locked to check redeem status
@@ -585,7 +585,7 @@ func (s *Swapper) TxMonitored(user account.AccountID, asset uint32, txid string)
 			}
 
 			// Taker's redemption transaction is the asset of interest.
-			_, takerRedeemDone := s.redeemStatus(match.makerStatus, match.takerStatus)
+			_, takerRedeemDone := s.redeemStatus(ctx, match.makerStatus, match.takerStatus)
 			if !takerRedeemDone && user == match.Taker.User() &&
 				match.takerStatus.redemption.TxID() == txid {
 				return true
@@ -599,7 +599,7 @@ func (s *Swapper) TxMonitored(user account.AccountID, asset uint32, txid string)
 			}
 
 			// Maker's redemption transaction is the asset of interest.
-			makerRedeemDone := s.makerRedeemStatus(match.makerStatus, match.takerStatus.swapAsset)
+			makerRedeemDone := s.makerRedeemStatus(ctx, match.makerStatus, match.takerStatus.swapAsset)
 			if !makerRedeemDone && user == match.Maker.User() &&
 				match.makerStatus.redemption.TxID() == txid {
 				return true
@@ -1074,11 +1074,11 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 // audited by the Swapper, the counter-party is informed with an 'audit'
 // request. This method is run as a coin waiter, hence the return value
 // indicates if future attempts should be made to check coin status.
-func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepInfo *stepInformation) bool {
+func (s *Swapper) processInit(ctx context.Context, msg *msgjson.Message, params *msgjson.Init, stepInfo *stepInformation) bool {
 	// Validate the swap contract
 	chain := stepInfo.asset.Backend
 	actor, counterParty := stepInfo.actor, stepInfo.counterParty
-	contract, err := chain.Contract(params.CoinID, params.Contract)
+	contract, err := chain.Contract(ctx, params.CoinID, params.Contract)
 	if err != nil {
 		if err == asset.CoinNotFoundError {
 			return wait.TryAgain
@@ -1181,7 +1181,7 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 // processRedeem processes a 'redeem' request from a client. processRedeem does
 // not perform user authentication, which is handled in handleRedeem before
 // processRedeem is invoked. This method is run as a coin waiter.
-func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, stepInfo *stepInformation) bool {
+func (s *Swapper) processRedeem(ctx context.Context, msg *msgjson.Message, params *msgjson.Redeem, stepInfo *stepInformation) bool {
 	// TODO(consider): Extract secret from initiator's (maker's) redemption
 	// transaction. The Backend would need a method identify the component of
 	// the redemption transaction that contains the secret and extract it. In a
@@ -1207,7 +1207,7 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 		s.respondError(msg.ID, actor.user, msgjson.UnknownMarketError, "secret validation failed")
 		return wait.DontTryAgain
 	}
-	redemption, err := chain.Redemption(params.CoinID, cpSwapCoin)
+	redemption, err := chain.Redemption(ctx, params.CoinID, cpSwapCoin)
 	// If there is an error, don't return an error yet, since it could be due to
 	// network latency. Instead, queue it up for another check.
 	if err != nil {
@@ -1298,7 +1298,7 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 // swap contract script and the CoinID of contract. Most of the work is
 // performed by processInit, but the request is parsed and user is authenticated
 // first.
-func (s *Swapper) handleInit(user account.AccountID, msg *msgjson.Message) *msgjson.Error {
+func (s *Swapper) handleInit(ctx context.Context, user account.AccountID, msg *msgjson.Message) *msgjson.Error {
 	params := new(msgjson.Init)
 	err := json.Unmarshal(msg.Payload, &params)
 	if err != nil {
@@ -1373,7 +1373,7 @@ func (s *Swapper) handleInit(user account.AccountID, msg *msgjson.Message) *msgj
 	s.latencyQ.Wait(&wait.Waiter{
 		Expiration: time.Now().Add(txWaitExpiration),
 		TryFunc: func() bool {
-			return s.processInit(msg, params, stepInfo)
+			return s.processInit(ctx, msg, params, stepInfo)
 		},
 		ExpireFunc: func() {
 			s.coinNotFound(user, msg.ID, params.CoinID)
@@ -1385,7 +1385,7 @@ func (s *Swapper) handleInit(user account.AccountID, msg *msgjson.Message) *msgj
 // handleRedeem handles the 'redeem' request from a user. Most of the work is
 // performed by processRedeem, but the request is parsed and user is
 // authenticated first.
-func (s *Swapper) handleRedeem(user account.AccountID, msg *msgjson.Message) *msgjson.Error {
+func (s *Swapper) handleRedeem(ctx context.Context, user account.AccountID, msg *msgjson.Message) *msgjson.Error {
 	params := new(msgjson.Redeem)
 
 	err := json.Unmarshal(msg.Payload, &params)
@@ -1425,7 +1425,7 @@ func (s *Swapper) handleRedeem(user account.AccountID, msg *msgjson.Message) *ms
 	s.latencyQ.Wait(&wait.Waiter{
 		Expiration: time.Now().Add(txWaitExpiration),
 		TryFunc: func() bool {
-			return s.processRedeem(msg, params, stepInfo)
+			return s.processRedeem(ctx, msg, params, stepInfo)
 		},
 		ExpireFunc: func() {
 			s.coinNotFound(user, msg.ID, params.CoinID)

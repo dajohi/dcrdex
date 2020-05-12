@@ -19,6 +19,7 @@ require (
 	github.com/decred/dcrd/dcrutil/v3 v3.0.0-20200503044000-76f6906e50e5
 	github.com/decred/dcrd/hdkeychain/v2 v2.1.0
 	github.com/decred/dcrd/rpc/jsonrpc/types/v2 v2.0.1-0.20200503044000-76f6906e50e5
+	github.com/decred/dcrd/rpcclient/v5 v5.0.0
 	github.com/decred/dcrd/rpcclient/v6 v6.0.0-20200511175520-d08cb3f72b3b
 	github.com/decred/dcrd/txscript/v2 v2.1.0
 	github.com/decred/dcrd/wire v1.3.0

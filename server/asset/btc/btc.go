@@ -29,8 +29,8 @@ import (
 type Driver struct{}
 
 // Setup creates the BTC backend. Start the backend with its Run method.
-func (d *Driver) Setup(configPath string, logger dex.Logger, network dex.Network) (asset.Backend, error) {
-	return NewBackend(configPath, logger, network)
+func (d *Driver) Setup(ctx context.Context, configPath string, logger dex.Logger, network dex.Network) (asset.Backend, error) {
+	return NewBackend(ctx, configPath, logger, network)
 }
 
 // DecodeCoinID creates a human-readable representation of a coin ID for
@@ -103,7 +103,7 @@ var _ asset.Backend = (*Backend)(nil)
 // NewBackend is the exported constructor by which the DEX will import the
 // backend. The configPath can be an empty string, in which case the standard
 // system location of the bitcoind config file is assumed.
-func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asset.Backend, error) {
+func NewBackend(_ context.Context, configPath string, logger dex.Logger, network dex.Network) (asset.Backend, error) {
 	var params *chaincfg.Params
 	switch network {
 	case dex.Mainnet:
@@ -201,7 +201,7 @@ func ReadCloneParams(cloneParams interface{}) (*chaincfg.Params, error) {
 
 // Contract is part of the asset.Backend interface. An asset.Contract is a
 // utxo that has been validated as a swap contract for the passed redeem script.
-func (btc *Backend) Contract(coinID []byte, redeemScript []byte) (asset.Contract, error) {
+func (btc *Backend) Contract(_ context.Context, coinID []byte, redeemScript []byte) (asset.Contract, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding coin ID %x: %v", coinID, err)
@@ -229,7 +229,7 @@ func (btc *Backend) ValidateSecret(secret, contract []byte) bool {
 }
 
 // Redemption is an input that redeems a swap contract.
-func (btc *Backend) Redemption(redemptionID, contractID []byte) (asset.Coin, error) {
+func (btc *Backend) Redemption(_ context.Context, redemptionID, contractID []byte) (asset.Coin, error) {
 	txHash, vin, err := decodeCoinID(redemptionID)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding redemption coin ID %x: %v", txHash, err)
@@ -249,7 +249,7 @@ func (btc *Backend) Redemption(redemptionID, contractID []byte) (asset.Coin, err
 }
 
 // FundingCoin is an unspent output.
-func (btc *Backend) FundingCoin(coinID []byte, redeemScript []byte) (asset.FundingCoin, error) {
+func (btc *Backend) FundingCoin(_ context.Context, coinID []byte, redeemScript []byte) (asset.FundingCoin, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding coin ID %x: %v", coinID, err)

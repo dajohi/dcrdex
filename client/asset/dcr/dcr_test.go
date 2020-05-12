@@ -16,6 +16,7 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
 	dexdcr "decred.org/dcrdex/dex/dcr"
+	walletjson "decred.org/dcrwallet/rpc/jsonrpc/types"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v2"
 	"github.com/decred/dcrd/dcrec"
@@ -25,7 +26,6 @@ import (
 	"github.com/decred/dcrd/rpcclient/v6"
 	"github.com/decred/dcrd/txscript/v2"
 	"github.com/decred/dcrd/wire"
-	walletjson "decred.org/dcrwallet/rpc/jsonrpc/types"
 	"github.com/decred/slog"
 )
 
