@@ -14,7 +14,7 @@ import (
 	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
-	"github.com/decred/dcrd/dcrec/secp256k1/v2"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3"
 	"golang.org/x/crypto/blake2s"
 )
 
@@ -77,7 +77,7 @@ func (ai *AccountInfo) Encode() []byte {
 	return dbBytes{0}.
 		AddData([]byte(ai.URL)).
 		AddData(ai.EncKey).
-		AddData(ai.DEXPubKey.Serialize()).
+		AddData(ai.DEXPubKey.SerializeCompressed()).
 		AddData(ai.FeeCoin).
 		AddData(ai.Cert)
 }
@@ -411,7 +411,7 @@ func encodeDEXAccount(acct *AccountInfo) []byte {
 	return dbBytes{0}.
 		AddData([]byte(acct.URL)).
 		AddData(acct.EncKey).
-		AddData(acct.DEXPubKey.Serialize())
+		AddData(acct.DEXPubKey.SerializeCompressed())
 }
 
 // decodeDEXAccount decodes the versioned blob into an AccountInfo.

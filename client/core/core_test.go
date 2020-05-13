@@ -29,7 +29,8 @@ import (
 	"decred.org/dcrdex/dex/wait"
 	"decred.org/dcrdex/server/account"
 	"github.com/decred/dcrd/crypto/blake256"
-	"github.com/decred/dcrd/dcrec/secp256k1/v2"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3/ecdsa"
 	"github.com/decred/slog"
 )
 
@@ -86,7 +87,7 @@ func makeAcker(serializer func(msg *msgjson.Message) msgjson.Signable) func(msg 
 	return func(msg *msgjson.Message, f msgFunc) error {
 		signable := serializer(msg)
 		sigMsg, _ := signable.Serialize()
-		sig, _ := tDexPriv.Sign(sigMsg)
+		sig := ecdsa.Sign(tDexPriv, sigMsg)
 		ack := &msgjson.Acknowledgement{
 			Sig: sig.Serialize(),
 		}
@@ -355,7 +356,7 @@ func (c *tCoin) Value() uint64 {
 	return c.val
 }
 
-func (c *tCoin) Confirmations() (uint32, error) {
+func (c *tCoin) Confirmations(_ context.Context) (uint32, error) {
 	return c.confs, c.confsErr
 }
 
@@ -441,36 +442,36 @@ func (w *TXCWallet) Connect(ctx context.Context) (error, *sync.WaitGroup) {
 
 func (w *TXCWallet) Run(ctx context.Context) { <-ctx.Done() }
 
-func (w *TXCWallet) Balance(confs uint32) (available, locked uint64, err error) {
+func (w *TXCWallet) Balance(_ context.Context, confs uint32) (available, locked uint64, err error) {
 	return 0, 0, w.balErr
 }
 
-func (w *TXCWallet) Fund(v uint64, _ *dex.Asset) (asset.Coins, error) {
+func (w *TXCWallet) Fund(_ context.Context, v uint64, _ *dex.Asset) (asset.Coins, error) {
 	w.fundedVal = v
 	return w.fundCoins, w.fundErr
 }
 
-func (w *TXCWallet) ReturnCoins(asset.Coins) error {
+func (w *TXCWallet) ReturnCoins(context.Context, asset.Coins) error {
 	return nil
 }
 
-func (w *TXCWallet) FundingCoins([]dex.Bytes) (asset.Coins, error) {
+func (w *TXCWallet) FundingCoins(context.Context, []dex.Bytes) (asset.Coins, error) {
 	return w.fundingCoins, w.fundingCoinErr
 }
 
-func (w *TXCWallet) Swap(swap *asset.Swaps, _ *dex.Asset) ([]asset.Receipt, asset.Coin, error) {
+func (w *TXCWallet) Swap(_ context.Context, swap *asset.Swaps, _ *dex.Asset) ([]asset.Receipt, asset.Coin, error) {
 	return w.swapReceipts, &tCoin{id: []byte{0x0a, 0x0b}}, nil
 }
 
-func (w *TXCWallet) Redeem(_ context.Context, []*asset.Redemption, *dex.Asset) ([]dex.Bytes, asset.Coin, error) {
+func (w *TXCWallet) Redeem(context.Context, []*asset.Redemption, *dex.Asset) ([]dex.Bytes, asset.Coin, error) {
 	return w.redeemCoins, &tCoin{id: []byte{0x0c, 0x0d}}, nil
 }
 
-func (w *TXCWallet) SignMessage(asset.Coin, dex.Bytes) (pubkeys, sigs []dex.Bytes, err error) {
+func (w *TXCWallet) SignMessage(context.Context, asset.Coin, dex.Bytes) (pubkeys, sigs []dex.Bytes, err error) {
 	return nil, nil, w.signCoinErr
 }
 
-func (w *TXCWallet) AuditContract(coinID, contract dex.Bytes) (asset.AuditInfo, error) {
+func (w *TXCWallet) AuditContract(ctx context.Context, coinID, contract dex.Bytes) (asset.AuditInfo, error) {
 	return w.auditInfo, w.auditErr
 }
 
@@ -478,19 +479,19 @@ func (w *TXCWallet) FindRedemption(ctx context.Context, coinID dex.Bytes) (dex.B
 	return nil, nil
 }
 
-func (w *TXCWallet) Refund(asset.Receipt, *dex.Asset) error {
+func (w *TXCWallet) Refund(context.Context, asset.Receipt, *dex.Asset) error {
 	return nil
 }
 
-func (w *TXCWallet) Address() (string, error) {
+func (w *TXCWallet) Address(context.Context) (string, error) {
 	return "", w.addrErr
 }
 
-func (w *TXCWallet) Unlock(pw string, dur time.Duration) error {
+func (w *TXCWallet) Unlock(_ context.Context, pw string, dur time.Duration) error {
 	return w.unlockErr
 }
 
-func (w *TXCWallet) Lock() error {
+func (w *TXCWallet) Lock(_ context.Context) error {
 	return nil
 }
 
@@ -500,15 +501,15 @@ func (w *TXCWallet) Send(address string, fee uint64, _ *dex.Asset) (asset.Coin, 
 	return w.payFeeCoin, w.payFeeErr
 }
 
-func (w *TXCWallet) Confirmations(id dex.Bytes) (uint32, error) {
+func (w *TXCWallet) Confirmations(_ context.Context, id dex.Bytes) (uint32, error) {
 	return 0, nil
 }
 
-func (w *TXCWallet) PayFee(address string, fee uint64, nfo *dex.Asset) (asset.Coin, error) {
+func (w *TXCWallet) PayFee(_ context.Context, address string, fee uint64, nfo *dex.Asset) (asset.Coin, error) {
 	return w.payFeeCoin, w.payFeeErr
 }
 
-func (w *TXCWallet) Withdraw(address string, value, feeRate uint64) (asset.Coin, error) {
+func (w *TXCWallet) Withdraw(_ context.Context, address string, value, feeRate uint64) (asset.Coin, error) {
 	return w.payFeeCoin, w.payFeeErr
 }
 
@@ -838,7 +839,7 @@ type tDriver struct {
 	winfo   *asset.WalletInfo
 }
 
-func (drv *tDriver) Setup(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (asset.Wallet, error) {
+func (drv *tDriver) Setup(ctx context.Context, cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (asset.Wallet, error) {
 	return drv.f(cfg, logger, net)
 }
 
@@ -957,7 +958,7 @@ func TestRegister(t *testing.T) {
 	rig.db.acctErr = tErr
 
 	regRes := &msgjson.RegisterResult{
-		DEXPubKey:    acct.dexPubKey.Serialize(),
+		DEXPubKey:    acct.dexPubKey.SerializeCompressed(),
 		ClientPubKey: dex.Bytes{0x1}, // part of the serialization, but not the response
 		Address:      "someaddr",
 		Fee:          tFee,
@@ -978,7 +979,7 @@ func TestRegister(t *testing.T) {
 			req := new(msgjson.NotifyFee)
 			json.Unmarshal(msg.Payload, req)
 			sigMsg, _ := req.Serialize()
-			sig, _ := tDexPriv.Sign(sigMsg)
+			sig := ecdsa.Sign(tDexPriv, sigMsg)
 			// Shouldn't Sig be dex.Bytes?
 			result := &msgjson.Acknowledgement{Sig: sig.Serialize()}
 			resp, _ := msgjson.NewResponse(msg.ID, result, nil)
@@ -998,7 +999,7 @@ func TestRegister(t *testing.T) {
 					tCore.waiterMtx.Unlock()
 					if waiterCount > 0 {
 						tWallet.setConfs(tDCR.FundConf)
-						tCore.tipChange(tDCR.ID, nil)
+						tCore.tipChange(context.Background(), tDCR.ID, nil)
 						return
 					}
 				case <-timeout.C:
@@ -1406,12 +1407,13 @@ func TestTrade(t *testing.T) {
 	dcrWallet, tDcrWallet := newTWallet(tDCR.ID)
 	tCore.wallets[tDCR.ID] = dcrWallet
 	dcrWallet.address = "DsVmA7aqqWeKWy461hXjytbZbgCqbB8g2dq"
-	dcrWallet.Unlock(wPW, time.Hour)
+	ctx := context.Background()
+	dcrWallet.Unlock(ctx, wPW, time.Hour)
 
 	btcWallet, tBtcWallet := newTWallet(tBTC.ID)
 	tCore.wallets[tBTC.ID] = btcWallet
 	btcWallet.address = "12DXGkvxFjuq5btXYkwWfBZaz1rVwFgini"
-	btcWallet.Unlock(wPW, time.Hour)
+	btcWallet.Unlock(ctx, wPW, time.Hour)
 
 	qty := tDCR.LotSize * 10
 	rate := tBTC.RateStep * 1000
@@ -1820,12 +1822,13 @@ func TestTradeTracking(t *testing.T) {
 	dcrWallet, tDcrWallet := newTWallet(tDCR.ID)
 	tCore.wallets[tDCR.ID] = dcrWallet
 	dcrWallet.address = "DsVmA7aqqWeKWy461hXjytbZbgCqbB8g2dq"
-	dcrWallet.Unlock(wPW, time.Hour)
+	ctx :=  context.Background()
+	dcrWallet.Unlock(ctx, wPW, time.Hour)
 
 	btcWallet, tBtcWallet := newTWallet(tBTC.ID)
 	tCore.wallets[tBTC.ID] = btcWallet
 	btcWallet.address = "12DXGkvxFjuq5btXYkwWfBZaz1rVwFgini"
-	btcWallet.Unlock(wPW, time.Hour)
+	btcWallet.Unlock(ctx, wPW, time.Hour)
 
 	matchSize := 4 * tDCR.LotSize
 	cancelledQty := tDCR.LotSize
@@ -1991,7 +1994,7 @@ func TestTradeTracking(t *testing.T) {
 	redeemCoin := encode.RandomBytes(36)
 	tBtcWallet.redeemCoins = []dex.Bytes{redeemCoin}
 	rig.ws.queueResponse(msgjson.RedeemRoute, redeemAcker)
-	dc.tickAsset(tBTC.ID)
+	dc.tickAsset(ctx, tBTC.ID)
 	checkStatus("maker redeemed", order.MakerRedeemed)
 	if !bytes.Equal(proof.MakerRedeem, redeemCoin) {
 		t.Fatalf("redeem coin ID not logged")
@@ -2080,7 +2083,7 @@ func TestTradeTracking(t *testing.T) {
 	swapID := encode.RandomBytes(36)
 	tDcrWallet.swapReceipts = []asset.Receipt{&tReceipt{coin: &tCoin{id: swapID}}}
 	rig.ws.queueResponse(msgjson.InitRoute, initAcker)
-	dc.tickAsset(tBTC.ID)
+	dc.tickAsset(ctx, tBTC.ID)
 	checkStatus("taker swapped", order.TakerSwapCast)
 	if len(proof.TakerSwap) == 0 {
 		t.Fatalf("swap not broadcast with confirmations")
@@ -2264,10 +2267,11 @@ func TestResolveActiveTrades(t *testing.T) {
 	tBtcWallet.auditInfo = auditInfo
 
 	// reset
+	ctx := context.Background()
 	reset := func() {
 		rig.acct.lock()
-		dcrWallet.Lock()
-		btcWallet.Lock()
+		dcrWallet.Lock(ctx)
+		btcWallet.Lock(ctx)
 		rig.dc.trades = make(map[order.OrderID]*trackedTrade)
 	}
 

@@ -26,7 +26,8 @@ import (
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/dex/wait"
-	"github.com/decred/dcrd/dcrec/secp256k1/v2"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3/ecdsa"
 )
 
 const (
@@ -854,7 +855,7 @@ func (c *Core) Register(form *RegisterForm) error {
 
 	// Prepare and sign the registration payload.
 	dexReg := &msgjson.Register{
-		PubKey: pubKey.Serialize(),
+		PubKey: pubKey.SerializeCompressed(),
 		Time:   encode.UnixMilliU(time.Now()),
 	}
 	err = sign(privKey, dexReg)
@@ -2418,7 +2419,7 @@ func checkSigS256(msg, pkBytes, sigBytes []byte) (*secp256k1.PublicKey, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error decoding secp256k1 PublicKey from bytes: %v", err)
 	}
-	signature, err := secp256k1.ParseDERSignature(sigBytes)
+	signature, err := ecdsa.ParseDERSignature(sigBytes)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding secp256k1 Signature from bytes: %v", err)
 	}
@@ -2434,10 +2435,7 @@ func sign(privKey *secp256k1.PrivateKey, payload msgjson.Signable) error {
 	if err != nil {
 		return fmt.Errorf("Error serializing request: %v", err)
 	}
-	sig, err := privKey.Sign(sigMsg)
-	if err != nil {
-		return fmt.Errorf("message signing error: %v", err)
-	}
+	sig := ecdsa.Sign(privKey, sigMsg)
 	payload.SetSig(sig.Serialize())
 	return nil
 }

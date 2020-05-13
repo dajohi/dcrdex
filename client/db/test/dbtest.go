@@ -10,13 +10,13 @@ import (
 
 	"decred.org/dcrdex/client/db"
 	ordertest "decred.org/dcrdex/dex/order/test"
-	"github.com/decred/dcrd/dcrec/secp256k1/v2"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3"
 )
 
 // Generate a public key on the secp256k1 curve.
 func randomPubKey() *secp256k1.PublicKey {
-	_, pub := secp256k1.PrivKeyFromBytes(randBytes(32))
-	return pub
+	priv := secp256k1.PrivKeyFromBytes(randBytes(32))
+	return priv.PubKey()
 }
 
 func randString(maxLen int) string {

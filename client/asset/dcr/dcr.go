@@ -1489,13 +1489,7 @@ func (dcr *ExchangeWallet) createSig(ctx context.Context, tx *wire.MsgTx, idx in
 	}
 
 	sigType := sigTyper.DSA()
-	switch sigType {
-	case dcrec.STEcdsaSecp256k1:
-		sig, err = txscript.RawTxInSignature(tx, idx, pkScript, txscript.SigHashAll, priv.Serialize(), dcrec.STEcdsaSecp256k1)
-	default:
-		//sig, err = txscript.RawTxInSignatureAlt(tx, idx, pkScript, txscript.SigHashAll, priv, sigType)
-		err = fmt.Errorf("unsupported signature type")
-	}
+	sig, err = txscript.RawTxInSignature(tx, idx, pkScript, txscript.SigHashAll, priv.Serialize(), sigType)
 	if err != nil {
 		return nil, nil, err
 	}
