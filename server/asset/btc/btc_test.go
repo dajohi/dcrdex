@@ -783,7 +783,8 @@ func TestUTXOs(t *testing.T) {
 	// Overwrite the test blockchain transaction details.
 	testAddTxOut(msg.tx, 0, txHash, blockHash, int64(txHeight), 1)
 	// "mining" the block should cause a reorg.
-	confs, err := utxo.Confirmations()
+	ctx := context.Background()
+	confs, err := utxo.Confirmations(ctx)
 	if err != nil {
 		t.Fatalf("case 1 - error retrieving confirmations after transaction \"mined\": %v", err)
 	}
@@ -844,7 +845,7 @@ func TestUTXOs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("case 5 - received error for utxo")
 	}
-	_, err = utxo.Confirmations()
+	_, err = utxo.Confirmations(ctx)
 	if err != nil {
 		t.Fatalf("case 5 - received error before reorg")
 	}
@@ -853,13 +854,13 @@ func TestUTXOs(t *testing.T) {
 	// return it.
 	testDeleteTxOut(txHash, msg.vout)
 	time.Sleep(blockPollDelay)
-	_, err = utxo.Confirmations()
+	_, err = utxo.Confirmations(ctx)
 	if err == nil {
 		t.Fatalf("case 5 - received no error for orphaned transaction")
 	}
 	// Now put it back in mempool and check again.
 	testAddTxOut(msg.tx, msg.vout, txHash, nil, 0, 0)
-	confs, err = utxo.Confirmations()
+	confs, err = utxo.Confirmations(ctx)
 	if err != nil {
 		t.Fatalf("case 5 - error checking confirmations on orphaned transaction back in mempool: %v", err)
 	}
@@ -884,7 +885,7 @@ func TestUTXOs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("case 6 - received error for utxo: %v", err)
 	}
-	confs, err = utxo.Confirmations()
+	confs, err = utxo.Confirmations(ctx)
 	if err != nil {
 		t.Fatalf("case 6 - error getting confirmations: %v", err)
 	}
@@ -1050,11 +1051,12 @@ func TestRedemption(t *testing.T) {
 	// A valid mempool redemption.
 	verboseTx = testAddTxVerbose(msg.tx, txHash, nil, 0)
 	verboseTx.Vin = append(verboseTx.Vin, vin)
-	redemption, err := btc.Redemption(redemptionID, spentID)
+	ctx := context.Background()
+	redemption, err := btc.Redemption(ctx, redemptionID, spentID)
 	if err != nil {
 		t.Fatalf("Redemption error: %v", err)
 	}
-	confs, err := redemption.Confirmations()
+	confs, err := redemption.Confirmations(ctx)
 	if err != nil {
 		t.Fatalf("redemption Confirmations error: %v", err)
 	}
@@ -1064,7 +1066,7 @@ func TestRedemption(t *testing.T) {
 
 	// Missing transaction
 	delete(testChain.txRaws, *txHash)
-	_, err = btc.Redemption(redemptionID, spentID)
+	_, err = btc.Redemption(ctx, redemptionID, spentID)
 	if err == nil {
 		t.Fatalf("No error for missing transaction")
 	}
@@ -1074,7 +1076,7 @@ func TestRedemption(t *testing.T) {
 	verboseTx.Vin = append(verboseTx.Vin, btcjson.Vin{
 		Txid: randomHash().String(),
 	})
-	_, err = btc.Redemption(redemptionID, spentID)
+	_, err = btc.Redemption(ctx, redemptionID, spentID)
 	if err == nil {
 		t.Fatalf("No error for wrong previous outpoint")
 	}
@@ -1085,11 +1087,11 @@ func TestRedemption(t *testing.T) {
 	verboseTx = testAddTxVerbose(msg.tx, txHash, blockHash, int64(blockHeight))
 	verboseTx.Vin = append(verboseTx.Vin, vin)
 	testAddBlockVerbose(blockHash, nil, 1, blockHeight)
-	redemption, err = btc.Redemption(redemptionID, spentID)
+	redemption, err = btc.Redemption(ctx, redemptionID, spentID)
 	if err != nil {
 		t.Fatalf("Redemption with confs error: %v", err)
 	}
-	confs, err = redemption.Confirmations()
+	confs, err = redemption.Confirmations(ctx)
 	if err != nil {
 		t.Fatalf("redemption with confs Confirmations error: %v", err)
 	}
@@ -1222,7 +1224,8 @@ func TestAuxiliary(t *testing.T) {
 	blockHash := testAddBlockVerbose(nil, nil, 1, txHeight)
 	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, int64(txHeight), maturity)
 	coinID := toCoinID(txHash, msg.vout)
-	utxo, err := btc.FundingCoin(coinID, nil)
+	ctx := context.Background()
+	utxo, err := btc.FundingCoin(ctx, coinID, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

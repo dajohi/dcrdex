@@ -23,7 +23,8 @@ import (
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/server/matcher"
 	"decred.org/dcrdex/server/swap"
-	"github.com/decred/dcrd/dcrec/secp256k1/v2"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3/ecdsa"
 	"github.com/decred/slog"
 )
 
@@ -121,7 +122,7 @@ type TAuth struct {
 	preimagesByOrdID map[string]order.Preimage
 }
 
-func (a *TAuth) Route(route string, handler func(account.AccountID, *msgjson.Message) *msgjson.Error) {
+func (a *TAuth) Route(route string, handler func(context.Context, account.AccountID, *msgjson.Message) *msgjson.Error) {
 	log.Infof("Route for %s", route)
 }
 func (a *TAuth) Auth(user account.AccountID, msg, sig []byte) error {
@@ -248,7 +249,7 @@ func (m *TMarketTunnel) CoinLocked(assetID uint32, coinid order.CoinID) bool {
 	return m.locked
 }
 
-func (m *TMarketTunnel) TxMonitored(user account.AccountID, asset uint32, txid string) bool {
+func (m *TMarketTunnel) TxMonitored(_ context.Context, user account.AccountID, asset uint32, txid string) bool {
 	return m.watched
 }
 
@@ -290,13 +291,13 @@ func (b *TBackend) utxo(coinID []byte) (*tUTXO, error) {
 	return &tUTXO{val: v}, b.utxoErr
 }
 
-func (b *TBackend) Contract(coinID, redeemScript []byte) (asset.Contract, error) {
+func (b *TBackend) Contract(_ context.Context, coinID, redeemScript []byte) (asset.Contract, error) {
 	return b.utxo(coinID)
 }
-func (b *TBackend) FundingCoin(coinID, redeemScript []byte) (asset.FundingCoin, error) {
+func (b *TBackend) FundingCoin(_ context.Context, coinID, redeemScript []byte) (asset.FundingCoin, error) {
 	return b.utxo(coinID)
 }
-func (b *TBackend) Redemption(redemptionID, contractID []byte) (asset.Coin, error) {
+func (b *TBackend) Redemption(_ context.Context, redemptionID, contractID []byte) (asset.Coin, error) {
 	return b.utxo(redemptionID)
 }
 func (b *TBackend) BlockChannel(size int) <-chan *asset.BlockUpdate { return nil }
@@ -323,7 +324,7 @@ var utxoAuthErr error
 var utxoConfsErr error
 var utxoConfs int64 = 2
 
-func (u *tUTXO) Confirmations() (int64, error) { return utxoConfs, utxoConfsErr }
+func (u *tUTXO) Confirmations(_ context.Context) (int64, error) { return utxoConfs, utxoConfsErr }
 func (u *tUTXO) Auth(pubkeys, sigs [][]byte, msg []byte) error {
 	return utxoAuthErr
 }
@@ -358,7 +359,7 @@ func (rig *tOrderRig) signedUTXO(id int, val uint64, numSigs int) *msgjson.Coin 
 	}
 	pk := u.privKey.PubKey().SerializeCompressed()
 	for i := 0; i < numSigs; i++ {
-		sig, _ := u.privKey.Sign(coin.ID)
+		sig := ecdsa.Sign(u.privKey, coin.ID)
 		coin.Sigs = append(coin.Sigs, sig.Serialize())
 		coin.PubKeys = append(coin.PubKeys, pk)
 	}
@@ -546,13 +547,14 @@ func TestLimit(t *testing.T) {
 
 	ensureErr := makeEnsureErr(t)
 
-	sendLimit := func() *msgjson.Error {
+	sendLimit := func(ctx context.Context) *msgjson.Error {
 		msg, _ := msgjson.NewRequest(reqID, msgjson.LimitRoute, limit)
-		return oRig.router.handleLimit(user.acct, msg)
+		return oRig.router.handleLimit(ctx, user.acct, msg)
 	}
 
 	// First just send it through and ensure there are no errors.
-	ensureErr("valid order", sendLimit(), -1)
+	ctx := context.Background()
+	ensureErr("valid order", sendLimit(ctx), -1)
 	// Make sure the order was submitted to the market
 	oRecord := oRig.market.pop()
 	if oRecord == nil {
@@ -567,7 +569,7 @@ func TestLimit(t *testing.T) {
 
 	// Now check with immediate TiF.
 	limit.TiF = msgjson.ImmediateOrderNum
-	ensureErr("valid order", sendLimit(), -1)
+	ensureErr("valid order", sendLimit(ctx), -1)
 	oRecord = oRig.market.pop()
 	if oRecord == nil {
 		t.Fatalf("no order submitted to epoch")
@@ -580,31 +582,31 @@ func TestLimit(t *testing.T) {
 	// Test an invalid payload.
 	msg := new(msgjson.Message)
 	msg.Payload = []byte(`?`)
-	rpcErr := oRig.router.handleLimit(user.acct, msg)
+	rpcErr := oRig.router.handleLimit(ctx, user.acct, msg)
 	ensureErr("bad payload", rpcErr, msgjson.RPCParseError)
 
 	// Wrong order type marked for limit order
 	limit.OrderType = msgjson.MarketOrderNum
-	ensureErr("wrong order type", sendLimit(), msgjson.OrderParameterError)
+	ensureErr("wrong order type", sendLimit(ctx), msgjson.OrderParameterError)
 	limit.OrderType = msgjson.LimitOrderNum
 
 	testPrefixTrade(&limit.Prefix, &limit.Trade, oRig.dcr, oRig.btc,
-		func(tag string, code int) { ensureErr(tag, sendLimit(), code) },
+		func(tag string, code int) { ensureErr(tag, sendLimit(ctx), code) },
 	)
 
 	// Rate = 0
 	limit.Rate = 0
-	ensureErr("zero rate", sendLimit(), msgjson.OrderParameterError)
+	ensureErr("zero rate", sendLimit(ctx), msgjson.OrderParameterError)
 	limit.Rate = rate
 
 	// non-step-multiple rate
 	limit.Rate = rate + (btcRateStep / 2)
-	ensureErr("non-step-multiple", sendLimit(), msgjson.OrderParameterError)
+	ensureErr("non-step-multiple", sendLimit(ctx), msgjson.OrderParameterError)
 	limit.Rate = rate
 
 	// Time-in-force incorrectly marked
 	limit.TiF = 0 // not msgjson.StandingOrderNum (1) or msgjson.ImmediateOrderNum (2)
-	ensureErr("bad tif", sendLimit(), msgjson.OrderParameterError)
+	ensureErr("bad tif", sendLimit(ctx), msgjson.OrderParameterError)
 	limit.TiF = msgjson.StandingOrderNum
 
 	// Now switch it to a buy order, and ensure it passes
@@ -616,7 +618,7 @@ func TestLimit(t *testing.T) {
 		buyUTXO,
 	}
 	limit.Address = dcrAddr
-	rpcErr = sendLimit()
+	rpcErr = sendLimit(ctx)
 	if rpcErr != nil {
 		t.Fatalf("error for buy order: %s", rpcErr.Message)
 	}
@@ -707,13 +709,14 @@ func TestMarketStartProcessStop(t *testing.T) {
 
 	ensureErr := makeEnsureErr(t)
 
-	sendMarket := func() *msgjson.Error {
+	sendMarket := func(ctx context.Context) *msgjson.Error {
 		msg, _ := msgjson.NewRequest(reqID, msgjson.MarketRoute, mkt)
-		return oRig.router.handleMarket(user.acct, msg)
+		return oRig.router.handleMarket(ctx, user.acct, msg)
 	}
 
 	// First just send it through and ensure there are no errors.
-	ensureErr("valid order", sendMarket(), -1)
+	ctx := context.Background()
+	ensureErr("valid order", sendMarket(ctx), -1)
 
 	// Make sure the order was submitted to the market
 	o := oRig.market.pop()
@@ -724,16 +727,16 @@ func TestMarketStartProcessStop(t *testing.T) {
 	// Test an invalid payload.
 	msg := new(msgjson.Message)
 	msg.Payload = []byte(`?`)
-	rpcErr := oRig.router.handleMarket(user.acct, msg)
+	rpcErr := oRig.router.handleMarket(ctx, user.acct, msg)
 	ensureErr("bad payload", rpcErr, msgjson.RPCParseError)
 
 	// Wrong order type marked for market order
 	mkt.OrderType = msgjson.LimitOrderNum
-	ensureErr("wrong order type", sendMarket(), msgjson.OrderParameterError)
+	ensureErr("wrong order type", sendMarket(ctx), msgjson.OrderParameterError)
 	mkt.OrderType = msgjson.MarketOrderNum
 
 	testPrefixTrade(&mkt.Prefix, &mkt.Trade, oRig.dcr, oRig.btc,
-		func(tag string, code int) { ensureErr(tag, sendMarket(), code) },
+		func(tag string, code int) { ensureErr(tag, sendMarket(ctx), code) },
 	)
 
 	// Now switch it to a buy order, and ensure it passes
@@ -750,10 +753,10 @@ func TestMarketStartProcessStop(t *testing.T) {
 	mkt.Quantity = matcher.BaseToQuote(midGap, uint64(dcrLotSize*1.2))
 	// First check an order that doesn't satisfy the market buy buffer. For
 	// testing, the market buy buffer is set to 1.5.
-	ensureErr("market buy buffer unsatisfied", sendMarket(), msgjson.FundingError)
+	ensureErr("market buy buffer unsatisfied", sendMarket(ctx), msgjson.FundingError)
 	mktBuyQty := matcher.BaseToQuote(midGap, uint64(dcrLotSize*1.6))
 	mkt.Quantity = mktBuyQty
-	rpcErr = sendMarket()
+	rpcErr = sendMarket(ctx)
 	if rpcErr != nil {
 		t.Fatalf("error for buy order: %s", rpcErr.Message)
 	}
@@ -835,13 +838,14 @@ func TestCancel(t *testing.T) {
 
 	ensureErr := makeEnsureErr(t)
 
-	sendCancel := func() *msgjson.Error {
+	sendCancel := func(ctx context.Context) *msgjson.Error {
 		msg, _ := msgjson.NewRequest(reqID, msgjson.CancelRoute, cancel)
-		return oRig.router.handleCancel(user.acct, msg)
+		return oRig.router.handleCancel(ctx, user.acct, msg)
 	}
 
 	// First just send it through and ensure there are no errors.
-	ensureErr("valid order", sendCancel(), -1)
+	ctx := context.Background()
+	ensureErr("valid order", sendCancel(ctx), -1)
 	// Make sure the order was submitted to the market
 	oRecord := oRig.market.pop()
 	if oRecord == nil {
@@ -851,27 +855,27 @@ func TestCancel(t *testing.T) {
 	// Test an invalid payload.
 	msg := new(msgjson.Message)
 	msg.Payload = []byte(`?`)
-	rpcErr := oRig.router.handleCancel(user.acct, msg)
+	rpcErr := oRig.router.handleCancel(ctx, user.acct, msg)
 	ensureErr("bad payload", rpcErr, msgjson.RPCParseError)
 
 	// Unknown order.
 	oRig.market.cancelable = false
-	ensureErr("non cancelable", sendCancel(), msgjson.OrderParameterError)
+	ensureErr("non cancelable", sendCancel(ctx), msgjson.OrderParameterError)
 	oRig.market.cancelable = true
 
 	// Wrong order type marked for cancel order
 	cancel.OrderType = msgjson.LimitOrderNum
-	ensureErr("wrong order type", sendCancel(), msgjson.OrderParameterError)
+	ensureErr("wrong order type", sendCancel(ctx), msgjson.OrderParameterError)
 	cancel.OrderType = msgjson.CancelOrderNum
 
 	testPrefix(&cancel.Prefix, func(tag string, code int) {
-		ensureErr(tag, sendCancel(), code)
+		ensureErr(tag, sendCancel(ctx), code)
 	})
 
 	// Test a short order ID.
 	badID := []byte{0x01, 0x02}
 	cancel.TargetID = badID
-	ensureErr("bad target ID", sendCancel(), msgjson.OrderParameterError)
+	ensureErr("bad target ID", sendCancel(ctx), msgjson.OrderParameterError)
 	cancel.TargetID = targetID[:]
 
 	// Clear the sends cache.
@@ -891,7 +895,7 @@ func TestCancel(t *testing.T) {
 		TargetOrderID: targetID,
 	}
 	// Send the order through again, so we can grab it from the epoch.
-	rpcErr = sendCancel()
+	rpcErr = sendCancel(ctx)
 	if rpcErr != nil {
 		t.Fatalf("error for valid order (after prefix testing): %s", rpcErr.Message)
 	}
@@ -1313,14 +1317,15 @@ func TestRouter(t *testing.T) {
 	// Have a subscriber connect and pull the orders from market 1.
 	// The format used here is link[market]_[count]
 	link1, sub := newSubscriber(mkt1)
-	router.handleOrderBook(link1, sub)
+	ctx := context.Background()
+	router.handleOrderBook(ctx, link1, sub)
 	tick(responseDelay)
 	orders := checkResponse("first link, market 1", mktName1, sub.ID, link1)
 	checkBook(src1, msgjson.StandingOrderNum, "first link, market 1", orders...)
 
 	// Another subscriber to the same market should behave identically.
 	link2, sub := newSubscriber(mkt1)
-	router.handleOrderBook(link2, sub)
+	router.handleOrderBook(ctx, link2, sub)
 	tick(responseDelay)
 	orders = checkResponse("second link, market 1", mktName1, sub.ID, link2)
 	checkBook(src1, msgjson.StandingOrderNum, "second link, market 1", orders...)
@@ -1352,8 +1357,8 @@ func TestRouter(t *testing.T) {
 
 	// Have both subscribers subscribe to market 2.
 	sub = newSubscription(mkt2)
-	router.handleOrderBook(link1, sub)
-	router.handleOrderBook(link2, sub)
+	router.handleOrderBook(ctx, link1, sub)
+	router.handleOrderBook(ctx, link2, sub)
 	tick(responseDelay)
 	orders = checkResponse("first link, market 2", mktName2, sub.ID, link1)
 	checkBook(src2, msgjson.StandingOrderNum, "first link, market 2", orders...)
@@ -1432,7 +1437,7 @@ func TestRouter(t *testing.T) {
 	unsub, _ := msgjson.NewRequest(10, msgjson.UnsubOrderBookRoute, &msgjson.UnsubOrderBook{
 		MarketID: mktName1,
 	})
-	router.handleUnsubOrderBook(link1, unsub)
+	router.handleUnsubOrderBook(ctx, link1, unsub)
 	tick(responseDelay)
 
 	// Client 1 should have an unsub response from the server.
@@ -1524,7 +1529,8 @@ func TestBadMessages(t *testing.T) {
 	// Bad encoding
 	ogPayload := sub.Payload
 	sub.Payload = []byte(`?`)
-	rpcErr := router.handleOrderBook(link, sub)
+	ctx := context.Background()
+	rpcErr := router.handleOrderBook(ctx, link, sub)
 	checkErr("bad payload", rpcErr, msgjson.RPCParseError)
 	sub.Payload = ogPayload
 
@@ -1534,7 +1540,7 @@ func TestBadMessages(t *testing.T) {
 		Quote: 400001,
 	}
 	sub = newSubscription(badMkt)
-	rpcErr = router.handleOrderBook(link, sub)
+	rpcErr = router.handleOrderBook(ctx, link, sub)
 	checkErr("bad payload", rpcErr, msgjson.UnknownMarket)
 
 	// Valid asset IDs, but not an actual market on the DEX.
@@ -1543,7 +1549,7 @@ func TestBadMessages(t *testing.T) {
 		Quote: 5264462, // PTN
 	}
 	sub = newSubscription(badMkt)
-	rpcErr = router.handleOrderBook(link, sub)
+	rpcErr = router.handleOrderBook(ctx, link, sub)
 	checkErr("bad payload", rpcErr, msgjson.UnknownMarket)
 
 	// Unsub with invalid payload
@@ -1552,7 +1558,7 @@ func TestBadMessages(t *testing.T) {
 	})
 	ogPayload = unsub.Payload
 	unsub.Payload = []byte(`?`)
-	rpcErr = router.handleUnsubOrderBook(link, unsub)
+	rpcErr = router.handleUnsubOrderBook(ctx, link, unsub)
 	checkErr("bad payload", rpcErr, msgjson.RPCParseError)
 	unsub.Payload = ogPayload
 
@@ -1560,13 +1566,13 @@ func TestBadMessages(t *testing.T) {
 	unsub, _ = msgjson.NewRequest(10, msgjson.UnsubOrderBookRoute, &msgjson.UnsubOrderBook{
 		MarketID: "sdgo_ptn",
 	})
-	rpcErr = router.handleUnsubOrderBook(link, unsub)
+	rpcErr = router.handleUnsubOrderBook(ctx, link, unsub)
 	checkErr("bad payload", rpcErr, msgjson.UnknownMarket)
 
 	// Unsub a user that's not subscribed.
 	unsub, _ = msgjson.NewRequest(10, msgjson.UnsubOrderBookRoute, &msgjson.UnsubOrderBook{
 		MarketID: mktName1,
 	})
-	rpcErr = router.handleUnsubOrderBook(link, unsub)
+	rpcErr = router.handleUnsubOrderBook(ctx, link, unsub)
 	checkErr("bad payload", rpcErr, msgjson.NotSubscribedError)
 }

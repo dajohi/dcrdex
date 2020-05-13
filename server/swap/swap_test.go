@@ -154,7 +154,7 @@ func (m *TAuthManager) Auth(user account.AccountID, msg, sig []byte) error {
 	return m.authErr
 }
 func (m *TAuthManager) Route(string,
-	func(account.AccountID, *msgjson.Message) *msgjson.Error) {
+	func(context.Context, account.AccountID, *msgjson.Message) *msgjson.Error) {
 }
 
 func (m *TAuthManager) Penalize(id account.AccountID, rule account.Rule) {
@@ -274,17 +274,17 @@ func newTAsset(lbl string) *TAsset {
 	}
 }
 
-func (a *TAsset) FundingCoin(coinID, redeemScript []byte) (asset.FundingCoin, error) {
+func (a *TAsset) FundingCoin(_ context.Context, coinID, redeemScript []byte) (asset.FundingCoin, error) {
 	a.mtx.RLock()
 	defer a.mtx.RUnlock()
 	return a.funds, a.fundsErr
 }
-func (a *TAsset) Contract(coinID, redeemScript []byte) (asset.Contract, error) {
+func (a *TAsset) Contract(_ context.Context, coinID, redeemScript []byte) (asset.Contract, error) {
 	a.mtx.RLock()
 	defer a.mtx.RUnlock()
 	return a.contract, a.contractErr
 }
-func (a *TAsset) Redemption(redemptionID, contractID []byte) (asset.Coin, error) {
+func (a *TAsset) Redemption(_ context.Context, redemptionID, contractID []byte) (asset.Coin, error) {
 	a.mtx.RLock()
 	defer a.mtx.RUnlock()
 	return a.redemption, a.redemptionErr
@@ -323,7 +323,7 @@ type TCoin struct {
 	auditVal  uint64
 }
 
-func (coin *TCoin) Confirmations() (int64, error) {
+func (coin *TCoin) Confirmations(_ context.Context) (int64, error) {
 	coin.mtx.RLock()
 	defer coin.mtx.RUnlock()
 	return coin.confs, coin.confsErr
@@ -423,7 +423,7 @@ func (rig *testRig) getTracker() *matchTracker {
 }
 
 // Taker: Acknowledge the servers match notification.
-func (rig *testRig) ackMatch_maker(checkSig bool) (err error) {
+func (rig *testRig) ackMatch_maker(_ context.Context, checkSig bool) (err error) {
 	matchInfo := rig.matchInfo
 	err = rig.ackMatch(matchInfo.maker, matchInfo.makerOID, matchInfo.taker.addr)
 	if err != nil {
@@ -439,7 +439,7 @@ func (rig *testRig) ackMatch_maker(checkSig bool) (err error) {
 }
 
 // Maker: Acknowledge the servers match notification.
-func (rig *testRig) ackMatch_taker(checkSig bool) error {
+func (rig *testRig) ackMatch_taker(_ context.Context, checkSig bool) error {
 	matchInfo := rig.matchInfo
 	err := rig.ackMatch(matchInfo.taker, matchInfo.takerOID, matchInfo.maker.addr)
 	if err != nil {
@@ -521,9 +521,9 @@ func (rig *testRig) checkResponse(user *tUser, txType string) error {
 }
 
 // Maker: Send swap transaction.
-func (rig *testRig) sendSwap_maker(checkStatus bool) (err error) {
+func (rig *testRig) sendSwap_maker(ctx context.Context, checkStatus bool) (err error) {
 	matchInfo := rig.matchInfo
-	swap, err := rig.sendSwap(matchInfo.maker, matchInfo.makerOID, matchInfo.taker.addr)
+	swap, err := rig.sendSwap(ctx, matchInfo.maker, matchInfo.makerOID, matchInfo.taker.addr)
 	if err != nil {
 		return fmt.Errorf("error sending maker swap transaction: %v", err)
 	}
@@ -543,10 +543,10 @@ func (rig *testRig) sendSwap_maker(checkStatus bool) (err error) {
 }
 
 // Taker: Send swap transaction.
-func (rig *testRig) sendSwap_taker(checkStatus bool) (err error) {
+func (rig *testRig) sendSwap_taker(ctx context.Context, checkStatus bool) (err error) {
 	matchInfo := rig.matchInfo
 	taker := matchInfo.taker
-	swap, err := rig.sendSwap(taker, matchInfo.takerOID, matchInfo.maker.addr)
+	swap, err := rig.sendSwap(ctx, taker, matchInfo.takerOID, matchInfo.maker.addr)
 	if err != nil {
 		return fmt.Errorf("error sending taker swap transaction: %v", err)
 	}
@@ -568,7 +568,7 @@ func (rig *testRig) sendSwap_taker(checkStatus bool) (err error) {
 	return nil
 }
 
-func (rig *testRig) sendSwap(user *tUser, oid order.OrderID, recipient string) (*tSwap, error) {
+func (rig *testRig) sendSwap(ctx context.Context, user *tUser, oid order.OrderID, recipient string) (*tSwap, error) {
 	matchInfo := rig.matchInfo
 	swap := tNewSwap(matchInfo, oid, recipient, user)
 	if isQuoteSwap(user, matchInfo.match) {
@@ -576,7 +576,7 @@ func (rig *testRig) sendSwap(user *tUser, oid order.OrderID, recipient string) (
 	} else {
 		rig.abcNode.contract = swap.coin
 	}
-	rpcErr := rig.swapper.handleInit(user.acct, swap.req)
+	rpcErr := rig.swapper.handleInit(ctx, user.acct, swap.req)
 	if rpcErr != nil {
 		resp, _ := msgjson.NewResponse(swap.req.ID, nil, rpcErr)
 		rig.auth.Send(user.acct, resp)
@@ -636,7 +636,7 @@ func (rig *testRig) auditSwap(msg *msgjson.Message, oid order.OrderID, contract,
 }
 
 // Maker: Acknowledge the DEX 'audit' request.
-func (rig *testRig) ackAudit_maker(checkSig bool) error {
+func (rig *testRig) ackAudit_maker(_ context.Context, checkSig bool) error {
 	maker := rig.matchInfo.maker
 	err := rig.ackAudit(maker, rig.matchInfo.db.makerAudit)
 	if err != nil {
@@ -652,7 +652,7 @@ func (rig *testRig) ackAudit_maker(checkSig bool) error {
 }
 
 // Taker: Acknowledge the DEX 'audit' request.
-func (rig *testRig) ackAudit_taker(checkSig bool) error {
+func (rig *testRig) ackAudit_taker(_ context.Context, checkSig bool) error {
 	taker := rig.matchInfo.taker
 	err := rig.ackAudit(taker, rig.matchInfo.db.takerAudit)
 	if err != nil {
@@ -676,9 +676,9 @@ func (rig *testRig) ackAudit(user *tUser, req *TRequest) error {
 }
 
 // Maker: Redeem taker's swap transaction.
-func (rig *testRig) redeem_maker(checkStatus bool) error {
+func (rig *testRig) redeem_maker(ctx context.Context, checkStatus bool) error {
 	matchInfo := rig.matchInfo
-	matchInfo.db.makerRedeem = rig.redeem(matchInfo.maker, matchInfo.makerOID)
+	matchInfo.db.makerRedeem = rig.redeem(ctx, matchInfo.maker, matchInfo.makerOID)
 	tracker := rig.getTracker()
 	// Check the match status
 	if checkStatus {
@@ -694,9 +694,9 @@ func (rig *testRig) redeem_maker(checkStatus bool) error {
 }
 
 // Taker: Redeem maker's swap transaction.
-func (rig *testRig) redeem_taker(checkStatus bool) error {
+func (rig *testRig) redeem_taker(ctx context.Context, checkStatus bool) error {
 	matchInfo := rig.matchInfo
-	matchInfo.db.takerRedeem = rig.redeem(matchInfo.taker, matchInfo.takerOID)
+	matchInfo.db.takerRedeem = rig.redeem(ctx, matchInfo.taker, matchInfo.takerOID)
 	tracker := rig.getTracker()
 	// Check the match status
 	if checkStatus {
@@ -711,7 +711,7 @@ func (rig *testRig) redeem_taker(checkStatus bool) error {
 	return nil
 }
 
-func (rig *testRig) redeem(user *tUser, oid order.OrderID) *tRedeem {
+func (rig *testRig) redeem(ctx context.Context, user *tUser, oid order.OrderID) *tRedeem {
 	matchInfo := rig.matchInfo
 	redeem := tNewRedeem(matchInfo, oid, user)
 	if isQuoteSwap(user, matchInfo.match) {
@@ -719,7 +719,7 @@ func (rig *testRig) redeem(user *tUser, oid order.OrderID) *tRedeem {
 	} else {
 		rig.xyzNode.redemption = redeem.coin
 	}
-	rpcErr := rig.swapper.handleRedeem(user.acct, redeem.req)
+	rpcErr := rig.swapper.handleRedeem(ctx, user.acct, redeem.req)
 	if rpcErr != nil {
 		msg, _ := msgjson.NewResponse(redeem.req.ID, nil, rpcErr)
 		rig.auth.Send(user.acct, msg)
@@ -728,7 +728,7 @@ func (rig *testRig) redeem(user *tUser, oid order.OrderID) *tRedeem {
 }
 
 // Taker: Acknowledge the DEX 'redemption' request.
-func (rig *testRig) ackRedemption_taker(checkSig bool) error {
+func (rig *testRig) ackRedemption_taker(_ context.Context, checkSig bool) error {
 	matchInfo := rig.matchInfo
 	err := rig.ackRedemption(matchInfo.taker, matchInfo.takerOID, matchInfo.db.makerRedeem)
 	if err != nil {
@@ -744,7 +744,7 @@ func (rig *testRig) ackRedemption_taker(checkSig bool) error {
 }
 
 // Maker: Acknowledge the DEX 'redemption' request.
-func (rig *testRig) ackRedemption_maker(checkSig bool) error {
+func (rig *testRig) ackRedemption_maker(_ context.Context, checkSig bool) error {
 	matchInfo := rig.matchInfo
 	err := rig.ackRedemption(matchInfo.maker, matchInfo.makerOID, matchInfo.db.takerRedeem)
 	if err != nil {
@@ -1122,23 +1122,24 @@ func testSwap(t *testing.T, rig *testRig) {
 
 	// Step through the negotiation process. No errors should be generated.
 	var takerAcked bool
+	ctx := context.Background()
 	for _, matchInfo := range rig.matches.matchInfos {
 		rig.matchInfo = matchInfo
-		ensureNilErr(rig.ackMatch_maker(true))
+		ensureNilErr(rig.ackMatch_maker(ctx, true))
 		if !takerAcked {
-			ensureNilErr(rig.ackMatch_taker(true))
+			ensureNilErr(rig.ackMatch_taker(ctx, true))
 			takerAcked = true
 		}
-		ensureNilErr(rig.sendSwap_maker(true))
+		ensureNilErr(rig.sendSwap_maker(ctx, true))
 		ensureNilErr(rig.auditSwap_taker())
-		ensureNilErr(rig.ackAudit_taker(true))
-		ensureNilErr(rig.sendSwap_taker(true))
+		ensureNilErr(rig.ackAudit_taker(ctx, true))
+		ensureNilErr(rig.sendSwap_taker(ctx, true))
 		ensureNilErr(rig.auditSwap_maker())
-		ensureNilErr(rig.ackAudit_maker(true))
-		ensureNilErr(rig.redeem_maker(true))
-		ensureNilErr(rig.ackRedemption_taker(true))
-		ensureNilErr(rig.redeem_taker(true))
-		ensureNilErr(rig.ackRedemption_maker(true))
+		ensureNilErr(rig.ackAudit_maker(ctx, true))
+		ensureNilErr(rig.redeem_maker(ctx, true))
+		ensureNilErr(rig.ackRedemption_taker(ctx, true))
+		ensureNilErr(rig.redeem_taker(ctx, true))
+		ensureNilErr(rig.ackRedemption_maker(ctx, true))
 	}
 }
 
@@ -1214,35 +1215,36 @@ func TestNoAck(t *testing.T) {
 
 	// Don't acknowledge from either side yet. Have the maker broadcast their swap
 	// transaction
-	mustBeError(rig.sendSwap_maker(true), "maker swap send")
+	ctx := context.Background()
+	mustBeError(rig.sendSwap_maker(ctx, true), "maker swap send")
 	checkSeqError(maker)
-	ensureNilErr(rig.ackMatch_maker(true))
+	ensureNilErr(rig.ackMatch_maker(ctx, true))
 	// Should be good to send the swap now.
-	ensureNilErr(rig.sendSwap_maker(true))
+	ensureNilErr(rig.sendSwap_maker(ctx, true))
 	// For the taker, there must be two acknowledgements before broadcasting the
 	// swap transaction, the match ack and the audit ack.
-	mustBeError(rig.sendSwap_taker(true), "no match-ack taker swap send")
+	mustBeError(rig.sendSwap_taker(ctx, true), "no match-ack taker swap send")
 	checkSeqError(taker)
-	ensureNilErr(rig.ackMatch_taker(true))
+	ensureNilErr(rig.ackMatch_taker(ctx, true))
 	// Try to send the swap without acknowledging the 'audit'.
-	mustBeError(rig.sendSwap_taker(true), "no audit-ack taker swap send")
+	mustBeError(rig.sendSwap_taker(ctx, true), "no audit-ack taker swap send")
 	checkSeqError(taker)
 	ensureNilErr(rig.auditSwap_taker())
-	ensureNilErr(rig.ackAudit_taker(true))
-	ensureNilErr(rig.sendSwap_taker(true))
+	ensureNilErr(rig.ackAudit_taker(ctx, true))
+	ensureNilErr(rig.sendSwap_taker(ctx, true))
 	// The maker should have received an 'audit' request. Don't acknowledge yet.
-	mustBeError(rig.redeem_maker(true), "maker redeem")
+	mustBeError(rig.redeem_maker(ctx, true), "maker redeem")
 	checkSeqError(maker)
 	ensureNilErr(rig.auditSwap_maker())
-	ensureNilErr(rig.ackAudit_maker(true))
-	ensureNilErr(rig.redeem_maker(true))
+	ensureNilErr(rig.ackAudit_maker(ctx, true))
+	ensureNilErr(rig.redeem_maker(ctx, true))
 	// The taker should have received a 'redemption' request. Don't acknowledge
 	// yet.
-	mustBeError(rig.redeem_taker(true), "taker redeem")
+	mustBeError(rig.redeem_taker(ctx, true), "taker redeem")
 	checkSeqError(taker)
-	ensureNilErr(rig.ackRedemption_taker(true))
-	ensureNilErr(rig.redeem_taker(true))
-	ensureNilErr(rig.ackRedemption_maker(true))
+	ensureNilErr(rig.ackRedemption_taker(ctx, true))
+	ensureNilErr(rig.redeem_taker(ctx, true))
+	ensureNilErr(rig.ackRedemption_maker(ctx, true))
 }
 
 func TestTxWaiters(t *testing.T) {
@@ -1256,11 +1258,12 @@ func TestTxWaiters(t *testing.T) {
 
 	// Get the MatchNotifications that the swapper sent to the clients and check
 	// the match notification length, content, IDs, etc.
-	ensureNilErr(rig.ackMatch_maker(true))
-	ensureNilErr(rig.ackMatch_taker(true))
+	ctx := context.Background()
+	ensureNilErr(rig.ackMatch_maker(ctx, true))
+	ensureNilErr(rig.ackMatch_taker(ctx, true))
 	// Set a non-latency error.
 	rig.abcNode.setContractErr(dummyError)
-	rig.sendSwap_maker(false)
+	rig.sendSwap_maker(ctx, false)
 	msg, resp := rig.auth.getResp(matchInfo.maker.acct)
 	if msg == nil {
 		t.Fatalf("no response for erroneous maker swap")
@@ -1269,7 +1272,7 @@ func TestTxWaiters(t *testing.T) {
 	rig.abcNode.setContractErr(asset.CoinNotFoundError)
 	// The error will be generated by the chainWaiter thread, so will need to
 	// check the response.
-	ensureNilErr(rig.sendSwap_maker(false))
+	ensureNilErr(rig.sendSwap_maker(ctx, false))
 	timeOutMempool()
 	// Should have an rpc error.
 	msg, resp = rig.auth.getResp(matchInfo.maker.acct)
@@ -1282,19 +1285,19 @@ func TestTxWaiters(t *testing.T) {
 
 	rig.abcNode.setContractErr(nil)
 	// Everything should work now.
-	ensureNilErr(rig.sendSwap_maker(true))
+	ensureNilErr(rig.sendSwap_maker(ctx, true))
 	ensureNilErr(rig.auditSwap_taker())
-	ensureNilErr(rig.ackAudit_taker(true))
+	ensureNilErr(rig.ackAudit_taker(ctx, true))
 	// Non-latency error.
 	rig.xyzNode.setContractErr(dummyError)
-	rig.sendSwap_taker(false)
+	rig.sendSwap_taker(ctx, false)
 	msg, _ = rig.auth.getResp(matchInfo.taker.acct)
 	if msg == nil {
 		t.Fatalf("no response for erroneous taker swap")
 	}
 	// For the taker swap, simulate latency.
 	rig.xyzNode.setContractErr(asset.CoinNotFoundError)
-	ensureNilErr(rig.sendSwap_taker(false))
+	ensureNilErr(rig.sendSwap_taker(ctx, false))
 	// Wait a tick
 	tickMempool()
 	// There should not be a response yet.
@@ -1314,11 +1317,11 @@ func TestTxWaiters(t *testing.T) {
 			resp.Error.Code, resp.Error.Message)
 	}
 	ensureNilErr(rig.auditSwap_maker())
-	ensureNilErr(rig.ackAudit_maker(true))
+	ensureNilErr(rig.ackAudit_maker(ctx, true))
 
 	// Set a transaction error for the maker's redemption.
 	rig.xyzNode.setRedemptionErr(asset.CoinNotFoundError)
-	ensureNilErr(rig.redeem_maker(false))
+	ensureNilErr(rig.redeem_maker(ctx, false))
 	tickMempool()
 	tickMempool()
 	msg, _ = rig.auth.getResp(matchInfo.maker.acct)
@@ -1340,16 +1343,16 @@ func TestTxWaiters(t *testing.T) {
 	// Get the tracker now, since it will be removed from the match dict if
 	// everything goes right
 	tracker := rig.getTracker()
-	ensureNilErr(rig.ackRedemption_taker(true))
+	ensureNilErr(rig.ackRedemption_taker(ctx, true))
 	rig.abcNode.setRedemptionErr(asset.CoinNotFoundError)
-	ensureNilErr(rig.redeem_taker(false))
+	ensureNilErr(rig.redeem_taker(ctx, false))
 	timeOutMempool()
 	msg, _ = rig.auth.getResp(matchInfo.taker.acct)
 	if msg == nil {
 		t.Fatalf("no response for erroneous taker redeem")
 	}
 	rig.abcNode.setRedemptionErr(nil)
-	ensureNilErr(rig.redeem_taker(true))
+	ensureNilErr(rig.redeem_taker(ctx, true))
 	// Set the number of confirmations on the redemptions.
 	matchInfo.db.makerRedeem.coin.setConfs(int64(rig.xyz.SwapConf))
 	matchInfo.db.takerRedeem.coin.setConfs(int64(rig.abc.SwapConf))
@@ -1416,21 +1419,22 @@ func TestBroadcastTimeouts(t *testing.T) {
 		return true
 	}
 	// Run a timeout test after every important step.
+	ctx := context.Background()
 	for i := 0; i <= 7; i++ {
 		set := tPerfectLimitLimit(uint64(1e8), uint64(1e8), true)
 		matchInfo := set.matchInfos[0]
 		rig.matchInfo = matchInfo
 		rig.swapper.Negotiate([]*order.MatchSet{set.matchSet}, nil)
 		// Step through the negotiation process. No errors should be generated.
-		ensureNilErr(rig.ackMatch_maker(true))
-		ensureNilErr(rig.ackMatch_taker(true))
+		ensureNilErr(rig.ackMatch_maker(ctx, true))
+		ensureNilErr(rig.ackMatch_taker(ctx, true))
 		if tryExpire(i, 0, order.NewlyMatched, matchInfo.maker, matchInfo.taker, rig.abcNode) {
 			continue
 		}
 		if tryExpire(i, 1, order.NewlyMatched, matchInfo.maker, matchInfo.taker, rig.abcNode) {
 			continue
 		}
-		ensureNilErr(rig.sendSwap_maker(true))
+		ensureNilErr(rig.sendSwap_maker(ctx, true))
 		matchInfo.db.makerSwap.coin.setConfs(int64(rig.abc.SwapConf))
 		// Do the audit here to clear the 'audit' request from the comms queue.
 		ensureNilErr(rig.auditSwap_taker())
@@ -1438,11 +1442,11 @@ func TestBroadcastTimeouts(t *testing.T) {
 		if tryExpire(i, 2, order.MakerSwapCast, matchInfo.taker, matchInfo.maker, rig.xyzNode) {
 			continue
 		}
-		ensureNilErr(rig.ackAudit_taker(true))
+		ensureNilErr(rig.ackAudit_taker(ctx, true))
 		if tryExpire(i, 3, order.MakerSwapCast, matchInfo.taker, matchInfo.maker, rig.xyzNode) {
 			continue
 		}
-		ensureNilErr(rig.sendSwap_taker(true))
+		ensureNilErr(rig.sendSwap_taker(ctx, true))
 		matchInfo.db.takerSwap.coin.setConfs(int64(rig.xyz.SwapConf))
 		// Do the audit here to clear the 'audit' request from the comms queue.
 		ensureNilErr(rig.auditSwap_maker())
@@ -1450,14 +1454,14 @@ func TestBroadcastTimeouts(t *testing.T) {
 		if tryExpire(i, 4, order.TakerSwapCast, matchInfo.maker, matchInfo.taker, rig.xyzNode) {
 			continue
 		}
-		ensureNilErr(rig.ackAudit_maker(true))
+		ensureNilErr(rig.ackAudit_maker(ctx, true))
 		if tryExpire(i, 5, order.TakerSwapCast, matchInfo.maker, matchInfo.taker, rig.xyzNode) {
 			continue
 		}
-		ensureNilErr(rig.redeem_maker(true))
+		ensureNilErr(rig.redeem_maker(ctx, true))
 		matchInfo.db.makerRedeem.coin.setConfs(int64(rig.xyz.SwapConf))
 		// Ack the redemption here to clear the 'audit' request from the comms queue.
-		ensureNilErr(rig.ackRedemption_taker(true))
+		ensureNilErr(rig.ackRedemption_taker(ctx, true))
 		sendBlock(rig.xyzNode)
 		if tryExpire(i, 6, order.MakerRedeemed, matchInfo.taker, matchInfo.maker, rig.abcNode) {
 			continue
@@ -1496,19 +1500,20 @@ func TestSigErrors(t *testing.T) {
 		tReq = rig.auth.getReq(user.acct)
 		apply(user)
 	}
-	testAction := func(stepFunc func(bool) error, user *tUser) {
+	testAction := func(stepFunc func(context.Context, bool) error, user *tUser) {
 		rig.auth.authErr = dummyError
 		stash(user)
+		ctx := context.Background()
 		// I really don't care if this is an error. The error will be pulled from
 		// the auth manager. But golangci-lint really wants me to check the error.
-		err := stepFunc(false)
+		err := stepFunc(ctx, false)
 		if err == nil && err != nil {
 			fmt.Printf("impossible")
 		}
 		checkResp(user)
 		rig.auth.authErr = nil
 		apply(user)
-		ensureNilErr(stepFunc(true))
+		ensureNilErr(stepFunc(ctx, true))
 	}
 	maker, taker := matchInfo.maker, matchInfo.taker
 	testAction(rig.ackMatch_maker, maker)
@@ -1534,20 +1539,21 @@ func TestMalformedSwap(t *testing.T) {
 	ensureNilErr := makeEnsureNilErr(t)
 	checkContractErr := rpcErrorChecker(t, rig, msgjson.ContractError)
 
-	ensureNilErr(rig.ackMatch_maker(true))
-	ensureNilErr(rig.ackMatch_taker(true))
+	ctx := context.Background()
+	ensureNilErr(rig.ackMatch_maker(ctx, true))
+	ensureNilErr(rig.ackMatch_taker(ctx, true))
 	// Bad contract value
 	tValSpoofer = 2
-	ensureNilErr(rig.sendSwap_maker(false))
+	ensureNilErr(rig.sendSwap_maker(ctx, false))
 	checkContractErr(matchInfo.maker)
 	tValSpoofer = 1
 	// Bad contract recipient
 	tRecipientSpoofer = "2"
-	ensureNilErr(rig.sendSwap_maker(false))
+	ensureNilErr(rig.sendSwap_maker(ctx, false))
 	checkContractErr(matchInfo.maker)
 	tRecipientSpoofer = ""
 	// Now make sure it works.
-	ensureNilErr(rig.sendSwap_maker(true))
+	ensureNilErr(rig.sendSwap_maker(ctx, true))
 }
 
 func TestBadParams(t *testing.T) {
@@ -1654,10 +1660,11 @@ func TestTxMonitored(t *testing.T) {
 	}
 
 	// Maker acks match and sends swap tx.
-	ensureNilErr(rig.ackMatch_maker(true))
-	ensureNilErr(rig.sendSwap_maker(true))
+	ctx := context.Background()
+	ensureNilErr(rig.ackMatch_maker(ctx, true))
+	ensureNilErr(rig.sendSwap_maker(ctx, true))
 	makerContractTx := rig.matchInfo.db.makerSwap.coin.TxID()
-	if !rig.swapper.TxMonitored(maker.acct, makerLockedAsset, makerContractTx) {
+	if !rig.swapper.TxMonitored(ctx, maker.acct, makerLockedAsset, makerContractTx) {
 		t.Errorf("maker contract %s (asset %d) was not monitored",
 			makerContractTx, makerLockedAsset)
 	}
@@ -1671,13 +1678,13 @@ func TestTxMonitored(t *testing.T) {
 
 	// For the taker, there must be two acknowledgements before broadcasting the
 	// swap transaction, the match ack and the audit ack.
-	ensureNilErr(rig.ackMatch_taker(true))
+	ensureNilErr(rig.ackMatch_taker(ctx, true))
 	ensureNilErr(rig.auditSwap_taker())
-	ensureNilErr(rig.ackAudit_taker(true))
-	ensureNilErr(rig.sendSwap_taker(true))
+	ensureNilErr(rig.ackAudit_taker(ctx, true))
+	ensureNilErr(rig.sendSwap_taker(ctx, true))
 
 	takerContractTx := rig.matchInfo.db.takerSwap.coin.TxID()
-	if !rig.swapper.TxMonitored(taker.acct, takerLockedAsset, takerContractTx) {
+	if !rig.swapper.TxMonitored(ctx, taker.acct, takerLockedAsset, takerContractTx) {
 		t.Errorf("taker contract %s (asset %d) was not monitored",
 			takerContractTx, takerLockedAsset)
 	}
@@ -1689,7 +1696,7 @@ func TestTxMonitored(t *testing.T) {
 	sendBlock(rig.xyzNode)
 
 	ensureNilErr(rig.auditSwap_maker())
-	ensureNilErr(rig.ackAudit_maker(true))
+	ensureNilErr(rig.ackAudit_maker(ctx, true))
 
 	// Set the number of confirmations on the contracts.
 	//tracker.makerStatus.swapTime
@@ -1703,10 +1710,10 @@ func TestTxMonitored(t *testing.T) {
 
 	// Now redeem
 
-	ensureNilErr(rig.redeem_maker(true))
+	ensureNilErr(rig.redeem_maker(ctx, true))
 
 	makerRedeemTx := rig.matchInfo.db.makerRedeem.coin.TxID()
-	if !rig.swapper.TxMonitored(maker.acct, takerLockedAsset, makerRedeemTx) {
+	if !rig.swapper.TxMonitored(ctx, maker.acct, takerLockedAsset, makerRedeemTx) {
 		t.Errorf("maker redeem %s (asset %d) was not monitored",
 			makerRedeemTx, takerLockedAsset)
 	}
@@ -1715,11 +1722,11 @@ func TestTxMonitored(t *testing.T) {
 		t.Fatalf("match not marked as MakerRedeemed: %d", tracker.Status)
 	}
 
-	ensureNilErr(rig.ackRedemption_taker(true))
-	ensureNilErr(rig.redeem_taker(true))
+	ensureNilErr(rig.ackRedemption_taker(ctx, true))
+	ensureNilErr(rig.redeem_taker(ctx, true))
 
 	takerRedeemTx := rig.matchInfo.db.takerRedeem.coin.TxID()
-	if !rig.swapper.TxMonitored(taker.acct, makerLockedAsset, takerRedeemTx) {
+	if !rig.swapper.TxMonitored(ctx, taker.acct, makerLockedAsset, takerRedeemTx) {
 		t.Errorf("taker redeem %s (asset %d) was not monitored",
 			takerRedeemTx, makerLockedAsset)
 	}
@@ -1728,18 +1735,18 @@ func TestTxMonitored(t *testing.T) {
 		t.Fatalf("match not marked as MatchComplete: %d", tracker.Status)
 	}
 
-	ensureNilErr(rig.ackRedemption_maker(true))
+	ensureNilErr(rig.ackRedemption_maker(ctx, true))
 
 	// Confirm both redeem txns up to SwapConf so they are no longer monitored.
 	matchInfo.db.makerRedeem.coin.setConfs(int64(rig.abc.SwapConf))
 	matchInfo.db.takerRedeem.coin.setConfs(int64(rig.xyz.SwapConf))
 
-	if rig.swapper.TxMonitored(taker.acct, makerLockedAsset, takerRedeemTx) {
+	if rig.swapper.TxMonitored(ctx, taker.acct, makerLockedAsset, takerRedeemTx) {
 		t.Errorf("taker redeem %s (asset %d) was still monitored",
 			takerRedeemTx, makerLockedAsset)
 	}
 
-	if rig.swapper.TxMonitored(maker.acct, takerLockedAsset, makerRedeemTx) {
+	if rig.swapper.TxMonitored(ctx, maker.acct, takerLockedAsset, makerRedeemTx) {
 		t.Errorf("maker redeem %s (asset %d) was still monitored",
 			makerRedeemTx, takerLockedAsset)
 	}
@@ -1749,12 +1756,12 @@ func TestTxMonitored(t *testing.T) {
 
 	sendBlock(rig.abcNode)
 
-	if rig.swapper.TxMonitored(maker.acct, makerLockedAsset, makerContractTx) {
+	if rig.swapper.TxMonitored(ctx, maker.acct, makerLockedAsset, makerContractTx) {
 		t.Errorf("maker contract %s (asset %d) was still monitored",
 			makerContractTx, makerLockedAsset)
 	}
 
-	if rig.swapper.TxMonitored(taker.acct, takerLockedAsset, takerContractTx) {
+	if rig.swapper.TxMonitored(ctx, taker.acct, takerLockedAsset, takerContractTx) {
 		t.Errorf("taker contract %s (asset %d) was still monitored",
 			takerContractTx, takerLockedAsset)
 	}

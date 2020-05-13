@@ -10,7 +10,7 @@ import (
 
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/encrypt"
-	"github.com/decred/dcrd/dcrec/secp256k1/v2"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3"
 )
 
 func dexKey(path string, pass []byte) (*secp256k1.PrivateKey, error) {

@@ -20,7 +20,7 @@ import (
 	"decred.org/dcrdex/server/db/driver/pg"
 	"decred.org/dcrdex/server/market"
 	"decred.org/dcrdex/server/swap"
-	"github.com/decred/dcrd/dcrec/secp256k1/v2"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3"
 	"github.com/decred/slog"
 )
 

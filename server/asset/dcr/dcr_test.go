@@ -25,6 +25,7 @@ import (
 	"github.com/decred/dcrd/dcrec"
 	"github.com/decred/dcrd/dcrec/edwards/v2"
 	"github.com/decred/dcrd/dcrec/secp256k1/v3"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3/ecdsa"
 	"github.com/decred/dcrd/dcrec/secp256k1/v3/schnorr"
 	"github.com/decred/dcrd/dcrutil/v3"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v2"
@@ -180,7 +181,7 @@ func txOutID(txHash *chainhash.Hash, index uint32) string {
 }
 
 // Part of the dcrNode interface.
-func (testNode) GetTxOut(txHash *chainhash.Hash, index uint32, _ bool) (*chainjson.GetTxOutResult, error) {
+func (testNode) GetTxOut(_ context.Context, txHash *chainhash.Hash, index uint32, _ bool) (*chainjson.GetTxOutResult, error) {
 	outID := txOutID(txHash, index)
 	out := testChain.txOuts[outID]
 	// Unfound is not an error for GetTxOut.
@@ -188,7 +189,7 @@ func (testNode) GetTxOut(txHash *chainhash.Hash, index uint32, _ bool) (*chainjs
 }
 
 // Part of the dcrNode interface.
-func (testNode) GetRawTransactionVerbose(txHash *chainhash.Hash) (*chainjson.TxRawResult, error) {
+func (testNode) GetRawTransactionVerbose(_ context.Context, txHash *chainhash.Hash) (*chainjson.TxRawResult, error) {
 	tx, found := testChain.txRaws[*txHash]
 	if !found {
 		return nil, fmt.Errorf("test transaction not found\n")
@@ -197,7 +198,7 @@ func (testNode) GetRawTransactionVerbose(txHash *chainhash.Hash) (*chainjson.TxR
 }
 
 // Part of the dcrNode interface.
-func (testNode) GetBlockVerbose(blockHash *chainhash.Hash, verboseTx bool) (*chainjson.GetBlockVerboseResult, error) {
+func (testNode) GetBlockVerbose(_ context.Context, blockHash *chainhash.Hash, verboseTx bool) (*chainjson.GetBlockVerboseResult, error) {
 	block, found := testChain.blocks[*blockHash]
 	if !found {
 		return nil, fmt.Errorf("test block not found")
@@ -206,7 +207,7 @@ func (testNode) GetBlockVerbose(blockHash *chainhash.Hash, verboseTx bool) (*cha
 }
 
 // Part of the dcrNode interface.
-func (testNode) GetBlockHash(blockHeight int64) (*chainhash.Hash, error) {
+func (testNode) GetBlockHash(_ context.Context, blockHeight int64) (*chainhash.Hash, error) {
 	hash, found := testChain.hashes[blockHeight]
 	if !found {
 		return nil, fmt.Errorf("test hash not found")
@@ -215,7 +216,7 @@ func (testNode) GetBlockHash(blockHeight int64) (*chainhash.Hash, error) {
 }
 
 // Part of the dcrNode interface.
-func (testNode) GetBestBlockHash() (*chainhash.Hash, error) {
+func (testNode) GetBestBlockHash(_ context.Context) (*chainhash.Hash, error) {
 	if len(testChain.hashes) == 0 {
 		return nil, fmt.Errorf("no blocks in testChain")
 	}
@@ -333,8 +334,8 @@ type testMsgTx struct {
 
 // Generate a public key on the secp256k1 curve.
 func genPubkey() ([]byte, []byte) {
-	_, pub := secp256k1.PrivKeyFromBytes(randomBytes(32))
-	pubkey := pub.Serialize()
+	priv := secp256k1.PrivKeyFromBytes(randomBytes(32))
+	pubkey := priv.PubKey().SerializeCompressed()
 	pkHash := dcrutil.Hash160(pubkey)
 	return pubkey, pkHash
 }
@@ -344,14 +345,11 @@ func s256Auth(msg []byte) *testAuth {
 	if err != nil {
 		fmt.Printf("s256Auth error: %v\n", err)
 	}
-	pubkey := priv.PubKey().Serialize()
+	pubkey := priv.PubKey().SerializeCompressed()
 	if msg == nil {
 		msg = randomBytes(32)
 	}
-	sig, err := priv.Sign(msg)
-	if err != nil {
-		fmt.Printf("s256Auth sign error: %v\n", err)
-	}
+	sig := ecdsa.Sign(priv, msg)
 	return &testAuth{
 		pubkey: pubkey,
 		pkHash: dcrutil.Hash160(pubkey),
@@ -386,15 +384,14 @@ func schnorrAuth(msg []byte) *testAuth {
 	if err != nil {
 		fmt.Printf("schnorrAuth error: %v\n", err)
 	}
-	pubkey := priv.PubKey().Serialize()
+	pubkey := priv.PubKey().SerializeCompressed()
 	if msg == nil {
 		msg = randomBytes(32)
 	}
-	r, s, err := schnorr.Sign(priv, msg)
+	sig, err := schnorr.Sign(priv, msg)
 	if err != nil {
 		fmt.Printf("schnorrAuth sign error: %v\n", err)
 	}
-	sig := schnorr.NewSignature(r, s)
 	return &testAuth{
 		pubkey: pubkey,
 		pkHash: dcrutil.Hash160(pubkey),
@@ -720,7 +717,8 @@ func TestUTXOs(t *testing.T) {
 	// Set the value of this one.
 	txout.Value = 2.0
 	// There is no block info to add, since this is a mempool transaction
-	utxo, err := dcr.utxo(txHash, msg.vout, nil)
+	ctx := context.Background()
+	utxo, err := dcr.utxo(ctx, txHash, msg.vout, nil)
 	if err != nil {
 		t.Fatalf("case 1 - unexpected error: %v", err)
 	}
@@ -736,7 +734,7 @@ func TestUTXOs(t *testing.T) {
 	testAddBlockVerbose(blockHash, 1, txHeight, 1)
 	// Overwrite the test blockchain transaction details.
 	testAddTxOut(msg.tx, 0, txHash, blockHash, int64(txHeight), 1)
-	confs, err := utxo.Confirmations()
+	confs, err := utxo.Confirmations(ctx)
 	if err != nil {
 		t.Fatalf("case 1 - error retrieving confirmations after transaction \"mined\": %v", err)
 	}
@@ -759,7 +757,7 @@ func TestUTXOs(t *testing.T) {
 		txHash = randomHash()
 		msg = testMsgTxRegular(sigType)
 		testAddTxOut(msg.tx, msg.vout, txHash, blockHash, int64(txHeight), 1)
-		utxo, err = dcr.utxo(txHash, msg.vout, nil)
+		utxo, err = dcr.utxo(ctx, txHash, msg.vout, nil)
 		if err != nil {
 			t.Fatalf("case 2 - unexpected error for sig type %d: %v", int(sigType), err)
 		}
@@ -771,7 +769,7 @@ func TestUTXOs(t *testing.T) {
 
 	// CASE 3: A UTXO that is invalid because it is non-existent
 	reset()
-	_, err = dcr.utxo(randomHash(), 0, nil)
+	_, err = dcr.utxo(ctx, randomHash(), 0, nil)
 	if err == nil {
 		t.Fatalf("case 3 - received no error for a non-existent UTXO")
 	}
@@ -784,7 +782,7 @@ func TestUTXOs(t *testing.T) {
 	// make the script nonsense.
 	msg.tx.TxOut[0].PkScript = []byte{0x00, 0x01, 0x02, 0x03}
 	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, int64(txHeight), 1)
-	_, err = dcr.utxo(txHash, msg.vout, nil)
+	_, err = dcr.utxo(ctx, txHash, msg.vout, nil)
 	if err == nil {
 		t.Fatalf("case 4 - received no error for a UTXO with wrong script type")
 	}
@@ -797,7 +795,7 @@ func TestUTXOs(t *testing.T) {
 	txHash = randomHash()
 	msg = testMsgTxRegular(dcrec.STEcdsaSecp256k1)
 	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, int64(txHeight), 1)
-	utxo, err = dcr.utxo(txHash, msg.vout, nil)
+	utxo, err = dcr.utxo(ctx, txHash, msg.vout, nil)
 	if err != nil {
 		t.Fatalf("case 5 - unexpected error: %v", err)
 	}
@@ -809,7 +807,7 @@ func TestUTXOs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("case 5 - error adding to block cache: %v", err)
 	}
-	_, err = utxo.Confirmations()
+	_, err = utxo.Confirmations(ctx)
 	if err == nil {
 		t.Fatalf("case 5 - block not detected as invalid after stakeholder invalidation")
 	}
@@ -822,7 +820,7 @@ func TestUTXOs(t *testing.T) {
 	immatureHash := testAddBlockVerbose(nil, 2, txHeight, 1)
 	msg = testMsgTxVote()
 	testAddTxOut(msg.tx, msg.vout, txHash, immatureHash, int64(txHeight), 1)
-	_, err = dcr.utxo(txHash, msg.vout, nil)
+	_, err = dcr.utxo(ctx, txHash, msg.vout, nil)
 	if err == nil {
 		t.Fatalf("case 6 - no error for immature transaction")
 	}
@@ -844,7 +842,7 @@ func TestUTXOs(t *testing.T) {
 		t.Fatalf("case 6 - error adding to maturing block cache: %v", err)
 	}
 	testAddTxOut(msg.tx, msg.vout, txHash, immatureHash, int64(txHeight), int64(txHeight)+maturity-1)
-	utxo, err = dcr.utxo(txHash, msg.vout, nil)
+	utxo, err = dcr.utxo(ctx, txHash, msg.vout, nil)
 	if err != nil {
 		t.Fatalf("case 6 - unexpected error after maturing block: %v", err)
 	}
@@ -860,11 +858,11 @@ func TestUTXOs(t *testing.T) {
 	blockHash = testAddBlockVerbose(nil, 1, txHeight, 1)
 	msg = testMsgTxRegular(dcrec.STEcdsaSecp256k1)
 	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, int64(txHeight), 1)
-	utxo, err = dcr.utxo(txHash, msg.vout, nil)
+	utxo, err = dcr.utxo(ctx, txHash, msg.vout, nil)
 	if err != nil {
 		t.Fatalf("case 7 - received error for utxo")
 	}
-	_, err = utxo.Confirmations()
+	_, err = utxo.Confirmations(ctx)
 	if err != nil {
 		t.Fatalf("case 7 - received error before reorg")
 	}
@@ -873,7 +871,7 @@ func TestUTXOs(t *testing.T) {
 	dcr.blockCache.reorg(int64(txHeight))
 	// Remove the txout from the blockchain, since dcrd would no longer return it.
 	delete(testChain.txOuts, txOutID(txHash, msg.vout))
-	_, err = utxo.Confirmations()
+	_, err = utxo.Confirmations(ctx)
 	if err == nil {
 		t.Fatalf("case 7 - received no error for orphaned transaction")
 	}
@@ -885,7 +883,7 @@ func TestUTXOs(t *testing.T) {
 	orphanHash := testAddBlockVerbose(nil, 1, txHeight, 1)
 	msg = testMsgTxRegular(dcrec.STEcdsaSecp256k1)
 	testAddTxOut(msg.tx, msg.vout, txHash, orphanHash, int64(txHeight), 1)
-	utxo, err = dcr.utxo(txHash, msg.vout, nil)
+	utxo, err = dcr.utxo(ctx, txHash, msg.vout, nil)
 	if err != nil {
 		t.Fatalf("case 8 - received error for utxo")
 	}
@@ -894,7 +892,7 @@ func TestUTXOs(t *testing.T) {
 	dcr.blockCache.reorg(int64(txHeight))
 	dcr.blockCache.add(testChain.blocks[*betterHash])
 	testAddTxOut(msg.tx, msg.vout, txHash, betterHash, int64(txHeight), 1)
-	_, err = utxo.Confirmations()
+	_, err = utxo.Confirmations(ctx)
 	if err != nil {
 		t.Fatalf("case 8 - unexpected error after reorg: %v", err)
 	}
@@ -906,7 +904,7 @@ func TestUTXOs(t *testing.T) {
 	dcr.blockCache.reorg(int64(txHeight))
 	dcr.blockCache.add(testChain.blocks[*evenBetter])
 	testAddTxOut(msg.tx, msg.vout, txHash, evenBetter, 0, 0)
-	_, err = utxo.Confirmations()
+	_, err = utxo.Confirmations(ctx)
 	if err != nil {
 		t.Fatalf("case 8 - unexpected error for mempool tx after reorg")
 	}
@@ -922,16 +920,16 @@ func TestUTXOs(t *testing.T) {
 	msgMultiSig := testMsgTxP2SHMofN(1, 2)
 	testAddTxOut(msgMultiSig.tx, msgMultiSig.vout, txHash, blockHash, int64(txHeight), 1)
 	// First try to get the UTXO without providing the raw script.
-	_, err = dcr.utxo(txHash, msgMultiSig.vout, nil)
+	_, err = dcr.utxo(ctx, txHash, msgMultiSig.vout, nil)
 	if err == nil {
 		t.Fatalf("no error thrown for p2sh utxo when no script was provided")
 	}
 	// Now provide the script.
-	utxo, err = dcr.utxo(txHash, msgMultiSig.vout, msgMultiSig.script)
+	utxo, err = dcr.utxo(ctx, txHash, msgMultiSig.vout, msgMultiSig.script)
 	if err != nil {
 		t.Fatalf("case 9 - received error for utxo: %v", err)
 	}
-	confs, err = utxo.Confirmations()
+	confs, err = utxo.Confirmations(ctx)
 	if err != nil {
 		t.Fatalf("case 9 - error getting confirmations: %v", err)
 	}
@@ -950,7 +948,7 @@ func TestUTXOs(t *testing.T) {
 	blockHash = testAddBlockVerbose(nil, 1, txHeight, 1)
 	msgMultiSig = testMsgTxP2SHMofN(2, 2)
 	testAddTxOut(msgMultiSig.tx, msgMultiSig.vout, txHash, blockHash, int64(txHeight), 1)
-	utxo, err = dcr.utxo(txHash, msgMultiSig.vout, msgMultiSig.script)
+	utxo, err = dcr.utxo(ctx, txHash, msgMultiSig.vout, msgMultiSig.script)
 	if err != nil {
 		t.Fatalf("case 10 - received error for utxo: %v", err)
 	}
@@ -980,7 +978,7 @@ func TestUTXOs(t *testing.T) {
 	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, int64(txHeight), maturity)
 	// mature the vote
 	testAddBlockVerbose(nil, 1, txHeight+uint32(maturity)-1, 1)
-	utxo, err = dcr.utxo(txHash, msg.vout, msg.script)
+	utxo, err = dcr.utxo(ctx, txHash, msg.vout, msg.script)
 	if err != nil {
 		t.Fatalf("case 11 - received error for utxo: %v", err)
 	}
@@ -1007,7 +1005,7 @@ func TestUTXOs(t *testing.T) {
 	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, int64(txHeight), maturity)
 	// mature the revocation
 	testAddBlockVerbose(nil, 1, txHeight+uint32(maturity)-1, 1)
-	utxo, err = dcr.utxo(txHash, msg.vout, msg.script)
+	utxo, err = dcr.utxo(ctx, txHash, msg.vout, msg.script)
 	if err != nil {
 		t.Fatalf("case 12 - received error for utxo: %v", err)
 	}
@@ -1035,7 +1033,7 @@ func TestUTXOs(t *testing.T) {
 	verboseTx.Vin = append(verboseTx.Vin, testVin(spentTx, spentVout))
 	txOut := swap.tx.TxOut[0]
 	verboseTx.Vout = append(verboseTx.Vout, testVout(float64(txOut.Value)/1e8, txOut.PkScript))
-	utxo, err = dcr.utxo(txHash, 0, swap.contract)
+	utxo, err = dcr.utxo(ctx, txHash, 0, swap.contract)
 	if err != nil {
 		t.Fatalf("case 13 - received error for utxo: %v", err)
 	}
@@ -1076,11 +1074,12 @@ func TestRedemption(t *testing.T) {
 	// A valid mempool redemption.
 	verboseTx := testAddTxVerbose(msg.tx, txHash, nil, 0, 0)
 	verboseTx.Vin = append(verboseTx.Vin, vin)
-	redemption, err := dcr.Redemption(redemptionID, spentID)
+	ctx := context.Background()
+	redemption, err := dcr.Redemption(ctx, redemptionID, spentID)
 	if err != nil {
 		t.Fatalf("Redemption error: %v", err)
 	}
-	confs, err := redemption.Confirmations()
+	confs, err := redemption.Confirmations(ctx)
 	if err != nil {
 		t.Fatalf("redemption Confirmations error: %v", err)
 	}
@@ -1090,7 +1089,7 @@ func TestRedemption(t *testing.T) {
 
 	// Missing transaction
 	delete(testChain.txRaws, *txHash)
-	_, err = dcr.Redemption(redemptionID, spentID)
+	_, err = dcr.Redemption(ctx, redemptionID, spentID)
 	if err == nil {
 		t.Fatalf("No error for missing transaction")
 	}
@@ -1100,7 +1099,7 @@ func TestRedemption(t *testing.T) {
 	verboseTx.Vin = append(verboseTx.Vin, chainjson.Vin{
 		Txid: randomHash().String(),
 	})
-	_, err = dcr.Redemption(redemptionID, spentID)
+	_, err = dcr.Redemption(ctx, redemptionID, spentID)
 	if err == nil {
 		t.Fatalf("No error for wrong previous outpoint")
 	}
@@ -1111,11 +1110,11 @@ func TestRedemption(t *testing.T) {
 	verboseTx = testAddTxVerbose(msg.tx, txHash, blockHash, int64(blockHeight), 1)
 	verboseTx.Vin = append(verboseTx.Vin, vin)
 	testAddBlockVerbose(blockHash, 1, blockHeight, 1)
-	redemption, err = dcr.Redemption(redemptionID, spentID)
+	redemption, err = dcr.Redemption(ctx, redemptionID, spentID)
 	if err != nil {
 		t.Fatalf("Redemption with confs error: %v", err)
 	}
-	confs, err = redemption.Confirmations()
+	confs, err = redemption.Confirmations(ctx)
 	if err != nil {
 		t.Fatalf("redemption with confs Confirmations error: %v", err)
 	}
@@ -1134,13 +1133,13 @@ func TestReorg(t *testing.T) {
 	// A general reset function that clears the testBlockchain and the blockCache.
 	tipHeight := 10
 	var tipHash *chainhash.Hash
-	reset := func() {
+	reset := func(ctx context.Context) {
 		cleanTestChain()
 		dcr.blockCache = newBlockCache(dcr.log)
 		for h := 0; h <= tipHeight; h++ {
 			blockHash := testAddBlockVerbose(nil, int64(tipHeight-h+1), uint32(h), 1)
 			// force dcr to get and cache the block
-			_, err := dcr.getDcrBlock(blockHash)
+			_, err := dcr.getDcrBlock(ctx, blockHash)
 			if err != nil {
 				t.Fatalf("getDcrBlock: %v", err)
 			}
@@ -1172,7 +1171,8 @@ func TestReorg(t *testing.T) {
 	}
 
 	// A one-block reorg.
-	reset()
+	ctx := context.Background()
+	reset(ctx)
 	// Add a replacement blocks
 	newHash := testAddBlockVerbose(nil, 1, uint32(tipHeight), 1)
 	// Passing the hash to anyQ triggers the reorganization.
@@ -1188,7 +1188,7 @@ func TestReorg(t *testing.T) {
 	}
 
 	// A 3-block reorg
-	reset()
+	reset(ctx)
 	tip, found1 := dcr.blockCache.mainchain[uint32(tipHeight)]
 	oneDeep, found2 := dcr.blockCache.mainchain[uint32(tipHeight-1)]
 	twoDeep, found3 := dcr.blockCache.mainchain[uint32(tipHeight-2)]
@@ -1231,7 +1231,8 @@ func TestAuxiliary(t *testing.T) {
 	blockHash := testAddBlockVerbose(nil, 1, txHeight, 1)
 	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, int64(txHeight), maturity)
 	coinID := toCoinID(txHash, msg.vout)
-	utxo, err := dcr.FundingCoin(coinID, nil)
+	ctx := context.Background()
+	utxo, err := dcr.FundingCoin(ctx, coinID, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1256,7 +1257,7 @@ func TestAuxiliary(t *testing.T) {
 		t.Errorf("vote output 0 was non-standard")
 	}
 	addr := scriptAddrs.PkHashes[0].String()
-	txAddr, v, confs, err := dcr.UnspentCoinDetails(toCoinID(txHash, 0))
+	txAddr, v, confs, err := dcr.UnspentCoinDetails(ctx, toCoinID(txHash, 0))
 	if err != nil {
 		t.Fatalf("UnspentCoinDetails error: %v", err)
 	}

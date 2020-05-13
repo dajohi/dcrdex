@@ -20,7 +20,8 @@ import (
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/comms"
-	"github.com/decred/dcrd/dcrec/secp256k1/v2"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3/ecdsa"
 )
 
 func noop() {}
@@ -76,13 +77,13 @@ func (s *TStorage) ExecutedCancelsForUser(aid account.AccountID, N int) (oids, t
 
 // TSigner satisfies the Signer interface
 type TSigner struct {
-	sig    *secp256k1.Signature
+	sig    *ecdsa.Signature
 	err    error
 	pubkey *secp256k1.PublicKey
 }
 
-func (s *TSigner) Sign(hash []byte) (*secp256k1.Signature, error) { return s.sig, s.err }
-func (s *TSigner) PubKey() *secp256k1.PublicKey                   { return s.pubkey }
+func (s *TSigner) Sign(hash []byte) (*ecdsa.Signature, error) { return s.sig, s.err }
+func (s *TSigner) PubKey() *secp256k1.PublicKey               { return s.pubkey }
 
 type tReq struct {
 	msg      *msgjson.Message
@@ -219,22 +220,19 @@ func queueUser(t *testing.T, user *tUser) *msgjson.Message {
 	if err != nil {
 		t.Fatalf("'connect' serialization error: %v", err)
 	}
-	sig, err := user.privKey.Sign(sigMsg)
-	if err != nil {
-		t.Fatalf("error signing message of length %d", len(sigMsg))
-	}
+	sig := ecdsa.Sign(user.privKey, sigMsg)
 	connect.SetSig(sig.Serialize())
 	msg, _ := msgjson.NewRequest(comms.NextID(), msgjson.ConnectRoute, connect)
 	return msg
 }
 
-func connectUser(t *testing.T, user *tUser) *msgjson.Message {
-	return tryConnectUser(t, user, false)
+func connectUser(ctx context.Context, t *testing.T, user *tUser) *msgjson.Message {
+	return tryConnectUser(ctx, t, user, false)
 }
 
-func tryConnectUser(t *testing.T, user *tUser, wantErr bool) *msgjson.Message {
+func tryConnectUser(ctx context.Context, t *testing.T, user *tUser, wantErr bool) *msgjson.Message {
 	connect := queueUser(t, user)
-	err := rig.mgr.handleConnect(user.conn, connect)
+	err := rig.mgr.handleConnect(ctx, user.conn, connect)
 	if (err != nil) != wantErr {
 		t.Fatalf("handleConnect: wantErr=%v, got err=%v", wantErr, err)
 	}
@@ -269,7 +267,7 @@ var (
 	tCheckFeeErr   error
 )
 
-func tCheckFee([]byte) (addr string, val uint64, confs int64, err error) {
+func tCheckFee(context.Context, []byte) (addr string, val uint64, confs int64, err error) {
 	return tCheckFeeAddr, tCheckFeeVal, tCheckFeeConfs, tCheckFeeErr
 }
 
@@ -346,13 +344,14 @@ func TestConnect(t *testing.T) {
 	// Fail on account failing cancel ratio.
 	rig.mgr.cancelThresh = 0.2
 	user := tNewUser(t)
-	tryConnectUser(t, user, true)
+	ctx := context.Background()
+	tryConnectUser(ctx, t, user, true)
 	rig.storage.closedID = account.AccountID{}
 	rig.mgr.cancelThresh = 0.8 // passable
 
 	// Connect the user.
 	user = tNewUser(t)
-	respMsg := connectUser(t, user)
+	respMsg := connectUser(ctx, t, user)
 	cResp := extractConnectResult(t, respMsg)
 	if len(cResp.Matches) != 1 {
 		t.Fatalf("no active matches")
@@ -417,7 +416,7 @@ func TestConnect(t *testing.T) {
 	reuser := tNewUser(t)
 	reuser.acctID = user.acctID
 	reuser.privKey = user.privKey
-	connectUser(t, reuser)
+	connectUser(ctx, t, reuser)
 	reqID = comms.NextID()
 	a10 := &tPayload{A: 10}
 	msg, _ = msgjson.NewRequest(reqID, "request", a10)
@@ -449,7 +448,8 @@ func TestAccountErrors(t *testing.T) {
 		Side:     order.Maker,
 	}
 	rig.storage.matches = []*order.UserMatch{userMatch}
-	rig.mgr.handleConnect(user.conn, connect)
+	ctx := context.Background()
+	rig.mgr.handleConnect(ctx, user.conn, connect)
 	rig.storage.matches = nil
 
 	// Check the response.
@@ -483,7 +483,7 @@ func TestAccountErrors(t *testing.T) {
 
 	// unpaid account.
 	rig.storage.unpaid = true
-	rpcErr := rig.mgr.handleConnect(user.conn, connect)
+	rpcErr := rig.mgr.handleConnect(ctx, user.conn, connect)
 	rig.storage.unpaid = false
 	if rpcErr == nil {
 		t.Fatalf("no error for unpaid account")
@@ -495,7 +495,7 @@ func TestAccountErrors(t *testing.T) {
 
 	// closed account
 	rig.storage.closed = true
-	rpcErr = rig.mgr.handleConnect(user.conn, connect)
+	rpcErr = rig.mgr.handleConnect(ctx, user.conn, connect)
 	rig.storage.closed = false
 	if rpcErr == nil {
 		t.Fatalf("no error for closed account")
@@ -509,10 +509,11 @@ func TestAccountErrors(t *testing.T) {
 
 func TestRoute(t *testing.T) {
 	user := tNewUser(t)
-	connectUser(t, user)
+	ctx := context.Background()
+	connectUser(ctx, t, user)
 
 	var translated account.AccountID
-	rig.mgr.Route("testroute", func(id account.AccountID, msg *msgjson.Message) *msgjson.Error {
+	rig.mgr.Route("testroute", func(_ context.Context, id account.AccountID, msg *msgjson.Message) *msgjson.Error {
 		translated = id
 		return nil
 	})
@@ -520,7 +521,7 @@ func TestRoute(t *testing.T) {
 	if f == nil {
 		t.Fatalf("'testroute' not registered")
 	}
-	rpcErr := f(user.conn, nil)
+	rpcErr := f(ctx, user.conn, nil)
 	if rpcErr != nil {
 		t.Fatalf("rpc error: %s", rpcErr.Message)
 	}
@@ -531,7 +532,7 @@ func TestRoute(t *testing.T) {
 	// Run the route with an unknown client. Should be an UnauthorizedConnection
 	// error.
 	foreigner := tNewUser(t)
-	rpcErr = f(foreigner.conn, nil)
+	rpcErr = f(ctx, foreigner.conn, nil)
 	if rpcErr == nil {
 		t.Fatalf("no error for unauthed user")
 	}
@@ -543,24 +544,19 @@ func TestRoute(t *testing.T) {
 
 func TestAuth(t *testing.T) {
 	user := tNewUser(t)
-	connectUser(t, user)
+	ctx := context.Background()
+	connectUser(ctx, t, user)
 
 	msgBytes := randBytes(50)
-	sig, err := user.privKey.Sign(msgBytes)
-	if err != nil {
-		t.Fatalf("signing error: %v", err)
-	}
+	sig := ecdsa.Sign(user.privKey, msgBytes)
 	sigBytes := sig.Serialize()
-	err = rig.mgr.Auth(user.acctID, msgBytes, sigBytes)
+	err := rig.mgr.Auth(user.acctID, msgBytes, sigBytes)
 	if err != nil {
 		t.Fatalf("unexpected auth error: %v", err)
 	}
 
 	foreigner := tNewUser(t)
-	sig, err = foreigner.privKey.Sign(msgBytes)
-	if err != nil {
-		t.Fatalf("foreigner signing error: %v", err)
-	}
+	sig = ecdsa.Sign(foreigner.privKey, msgBytes)
 	sigBytes = sig.Serialize()
 	err = rig.mgr.Auth(foreigner.acctID, msgBytes, sigBytes)
 	if err == nil {
@@ -600,10 +596,7 @@ func TestSign(t *testing.T) {
 	rig.signer.err = nil
 	sigMsg1 := randBytes(73)
 	privKey := tNewUser(t).privKey
-	sig1, err := privKey.Sign(sigMsg1)
-	if err != nil {
-		t.Fatalf("signing error: %v", err)
-	}
+	sig1 := ecdsa.Sign(privKey, sigMsg1)
 	sig1Bytes := sig1.Serialize()
 	rig.signer.sig = sig1
 	s = &tSignable{b: randBytes(25)}
@@ -625,7 +618,8 @@ func TestSign(t *testing.T) {
 
 func TestSend(t *testing.T) {
 	user := tNewUser(t)
-	connectUser(t, user)
+	ctx := context.Background()
+	connectUser(ctx, t, user)
 	foreigner := tNewUser(t)
 
 	type tA struct {
@@ -689,7 +683,8 @@ func TestSend(t *testing.T) {
 
 func TestPenalize(t *testing.T) {
 	user := tNewUser(t)
-	connectUser(t, user)
+	ctx := context.Background()
+	connectUser(ctx, t, user)
 	foreigner := tNewUser(t)
 
 	rig.mgr.Penalize(foreigner.acctID, 0)
@@ -724,7 +719,8 @@ func TestConnectErrors(t *testing.T) {
 		t.Fatalf("NewRequest error for invalid payload: %v", err)
 	}
 	msg.Payload = []byte(`?`)
-	rpcErr := rig.mgr.handleConnect(user.conn, msg)
+	ctx := context.Background()
+	rpcErr := rig.mgr.handleConnect(ctx, user.conn, msg)
 	ensureErr(rpcErr, "invalid payload", msgjson.RPCParseError)
 
 	connect := tNewConnect(user)
@@ -737,27 +733,27 @@ func TestConnectErrors(t *testing.T) {
 	// connect with an invalid ID
 	connect.AccountID = []byte{0x01, 0x02, 0x03, 0x04}
 	encodeMsg()
-	rpcErr = rig.mgr.handleConnect(user.conn, msg)
+	rpcErr = rig.mgr.handleConnect(ctx, user.conn, msg)
 	ensureErr(rpcErr, "invalid account ID", msgjson.AuthenticationError)
 	connect.AccountID = user.acctID[:]
 
 	// user unknown to storage
 	encodeMsg()
-	rpcErr = rig.mgr.handleConnect(user.conn, msg)
+	rpcErr = rig.mgr.handleConnect(ctx, user.conn, msg)
 	ensureErr(rpcErr, "account unknown to storage", msgjson.AuthenticationError)
 	rig.storage.acct = &account.Account{ID: user.acctID, PubKey: user.privKey.PubKey()}
 
 	// User unpaid
 	encodeMsg()
 	rig.storage.unpaid = true
-	rpcErr = rig.mgr.handleConnect(user.conn, msg)
+	rpcErr = rig.mgr.handleConnect(ctx, user.conn, msg)
 	ensureErr(rpcErr, "account unpaid", msgjson.AuthenticationError)
 	rig.storage.unpaid = false
 
 	// bad signature
 	connect.SetSig([]byte{0x09, 0x08})
 	encodeMsg()
-	rpcErr = rig.mgr.handleConnect(user.conn, msg)
+	rpcErr = rig.mgr.handleConnect(ctx, user.conn, msg)
 	ensureErr(rpcErr, "bad signature", msgjson.SignatureError)
 
 	// A send error should not return an error, but the client should not be
@@ -767,14 +763,11 @@ func TestConnectErrors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error serializing 'connect': %v", err)
 	}
-	sig, err := user.privKey.Sign(msgBytes)
-	if err != nil {
-		t.Fatalf("error signing 'connect': %v", err)
-	}
+	sig := ecdsa.Sign(user.privKey, msgBytes)
 	connect.SetSig(sig.Serialize())
 	encodeMsg()
 	user.conn.sendErr = fmt.Errorf("test error")
-	rpcErr = rig.mgr.handleConnect(user.conn, msg)
+	rpcErr = rig.mgr.handleConnect(ctx, user.conn, msg)
 	if rpcErr != nil {
 		t.Fatalf("non-nil msgjson.Error after send error: %s", rpcErr.Message)
 	}
@@ -788,7 +781,7 @@ func TestConnectErrors(t *testing.T) {
 	}
 
 	// success
-	rpcErr = rig.mgr.handleConnect(user.conn, msg)
+	rpcErr = rig.mgr.handleConnect(ctx, user.conn, msg)
 	if rpcErr != nil {
 		t.Fatalf("error for good connect: %s", rpcErr.Message)
 	}
@@ -800,7 +793,8 @@ func TestConnectErrors(t *testing.T) {
 
 func TestHandleResponse(t *testing.T) {
 	user := tNewUser(t)
-	connectUser(t, user)
+	ctx := context.Background()
+	connectUser(ctx, t, user)
 	foreigner := tNewUser(t)
 	unknownResponse, err := msgjson.NewResponse(comms.NextID(), 10, nil)
 	if err != nil {
@@ -870,7 +864,7 @@ func TestHandleRegister(t *testing.T) {
 			Time:   encode.UnixMilliU(unixMsNow()),
 		}
 		sigMsg, _ := reg.Serialize()
-		sig, _ := user.privKey.Sign(sigMsg)
+		sig := ecdsa.Sign(user.privKey, sigMsg)
 		reg.SetSig(sig.Serialize())
 		return reg
 	}
@@ -883,41 +877,39 @@ func TestHandleRegister(t *testing.T) {
 		return msg
 	}
 
-	do := func(msg *msgjson.Message) *msgjson.Error {
-		return rig.mgr.handleRegister(user.conn, msg)
+	do := func(ctx context.Context, msg *msgjson.Message) *msgjson.Error {
+		return rig.mgr.handleRegister(ctx, user.conn, msg)
 	}
 
 	ensureErr := makeEnsureErr(t)
 
 	msg := newMsg(newReg())
 	msg.Payload = []byte(`?`)
-	ensureErr(do(msg), "bad payload", msgjson.RPCParseError)
+	ctx := context.Background()
+	ensureErr(do(ctx, msg), "bad payload", msgjson.RPCParseError)
 
 	reg := newReg()
 	reg.PubKey = []byte(`abcd`)
-	ensureErr(do(newMsg(reg)), "bad pubkey", msgjson.PubKeyParseError)
+	ensureErr(do(ctx, newMsg(reg)), "bad pubkey", msgjson.PubKeyParseError)
 
 	// Signature error
 	reg = newReg()
 	reg.Sig = []byte{0x01, 0x02}
-	ensureErr(do(newMsg(reg)), "bad signature", msgjson.SignatureError)
+	ensureErr(do(ctx, newMsg(reg)), "bad signature", msgjson.SignatureError)
 
 	// storage.CreateAccount error
 	msg = newMsg(newReg())
 	rig.storage.acctErr = dummyError
-	ensureErr(do(msg), "CreateAccount error", msgjson.RPCInternalError)
+	ensureErr(do(ctx, msg), "CreateAccount error", msgjson.RPCInternalError)
 	rig.storage.acctErr = nil
 
 	// Sign error
 	rig.signer.err = dummyError
-	ensureErr(do(msg), "DEX signature error", msgjson.RPCInternalError)
+	ensureErr(do(ctx, msg), "DEX signature error", msgjson.RPCInternalError)
 	rig.signer.err = nil
 
 	sigMsg := randBytes(73)
-	sig, err := user.privKey.Sign(sigMsg)
-	if err != nil {
-		t.Fatalf("signing error: %v", err)
-	}
+	sig := ecdsa.Sign(user.privKey, sigMsg)
 	rig.signer.sig = sig
 
 	// Send a valid registration and check the response.
@@ -927,7 +919,7 @@ func TestHandleRegister(t *testing.T) {
 		b, _ := json.Marshal(respMsg)
 		t.Fatalf("unexpected response: %s", string(b))
 	}
-	rpcErr := do(msg)
+	rpcErr := do(ctx, msg)
 	if rpcErr != nil {
 		t.Fatalf("error for valid registration: %s", rpcErr.Message)
 	}
@@ -937,7 +929,7 @@ func TestHandleRegister(t *testing.T) {
 	}
 	resp, _ := respMsg.Response()
 	regRes := new(msgjson.RegisterResult)
-	err = json.Unmarshal(resp.Result, regRes)
+	err := json.Unmarshal(resp.Result, regRes)
 	if err != nil {
 		t.Fatalf("error unmarshaling payload")
 	}
@@ -976,7 +968,7 @@ func TestHandleNotifyFee(t *testing.T) {
 			Time:      encode.UnixMilliU(unixMsNow()),
 		}
 		sigMsg, _ := notify.Serialize()
-		sig, _ := user.privKey.Sign(sigMsg)
+		sig := ecdsa.Sign(user.privKey, sigMsg)
 		notify.SetSig(sig.Serialize())
 		return notify
 	}
@@ -989,16 +981,16 @@ func TestHandleNotifyFee(t *testing.T) {
 		return msg
 	}
 
-	do := func(msg *msgjson.Message) *msgjson.Error {
-		return rig.mgr.handleNotifyFee(user.conn, msg)
+	do := func(ctx context.Context, msg *msgjson.Message) *msgjson.Error {
+		return rig.mgr.handleNotifyFee(ctx, user.conn, msg)
 	}
 
 	// When the process makes it to the chainwaiter, it needs to be handled by
 	// getting the Send message. While the chainwaiter can run asynchronously,
 	// the first attempt is actually synchronous, so not need for synchronization
 	// as long as there is no PayFee error.
-	doWaiter := func(msg *msgjson.Message) *msgjson.Error {
-		msgErr := rig.mgr.handleNotifyFee(user.conn, msg)
+	doWaiter := func(ctx context.Context, msg *msgjson.Message) *msgjson.Error {
+		msgErr := rig.mgr.handleNotifyFee(ctx, user.conn, msg)
 		if msgErr != nil {
 			t.Fatal("never made it to the waiter", msgErr.Code, msgErr.Message)
 		}
@@ -1017,60 +1009,58 @@ func TestHandleNotifyFee(t *testing.T) {
 
 	msg := newMsg(newNotify())
 	msg.Payload = []byte(`?`)
-	ensureErr(do(msg), "bad payload", msgjson.RPCParseError)
+	ctx := context.Background()
+	ensureErr(do(ctx, msg), "bad payload", msgjson.RPCParseError)
 
 	notify := newNotify()
 	notify.AccountID = []byte{0x01, 0x02}
 	msg = newMsg(notify)
-	ensureErr(do(msg), "bad account ID", msgjson.AuthenticationError)
+	ensureErr(do(ctx, msg), "bad account ID", msgjson.AuthenticationError)
 
 	// missing account
 	rig.storage.acct = nil
-	ensureErr(do(newMsg(newNotify())), "bad account ID", msgjson.AuthenticationError)
+	ensureErr(do(ctx, newMsg(newNotify())), "bad account ID", msgjson.AuthenticationError)
 	rig.storage.acct = userAcct
 
 	// account already paid
-	ensureErr(do(newMsg(newNotify())), "already paid", msgjson.AuthenticationError)
+	ensureErr(do(ctx, newMsg(newNotify())), "already paid", msgjson.AuthenticationError)
 
 	// Signature error
 	rig.storage.unpaid = true // notifyfee cannot be sent for paid account
 	notify = newNotify()
 	notify.Sig = []byte{0x01, 0x02}
-	ensureErr(do(newMsg(notify)), "bad signature", msgjson.SignatureError)
+	ensureErr(do(ctx, newMsg(notify)), "bad signature", msgjson.SignatureError)
 
 	goodNotify := newNotify()
 	goodMsg := newMsg(goodNotify)
 	rig.storage.regErr = dummyError
-	ensureErr(do(goodMsg), "AccountRegAddr", msgjson.RPCInternalError)
+	ensureErr(do(ctx, goodMsg), "AccountRegAddr", msgjson.RPCInternalError)
 	rig.storage.regErr = nil
 
 	tCheckFeeVal -= 1
-	ensureErr(doWaiter(goodMsg), "low fee", msgjson.FeeError)
+	ensureErr(doWaiter(ctx, goodMsg), "low fee", msgjson.FeeError)
 	tCheckFeeVal += 1
 
 	ogAddr := tCheckFeeAddr
 	tCheckFeeAddr = "dummy address"
-	ensureErr(doWaiter(goodMsg), "wrong address", msgjson.FeeError)
+	ensureErr(doWaiter(ctx, goodMsg), "wrong address", msgjson.FeeError)
 	tCheckFeeAddr = ogAddr
 
 	rig.storage.payErr = dummyError
-	ensureErr(doWaiter(goodMsg), "PayAccount", msgjson.RPCInternalError)
+	ensureErr(doWaiter(ctx, goodMsg), "PayAccount", msgjson.RPCInternalError)
 	rig.storage.payErr = nil
 
 	// Sign error
 	rig.signer.err = dummyError
-	ensureErr(doWaiter(goodMsg), "DEX signature", msgjson.RPCInternalError)
+	ensureErr(doWaiter(ctx, goodMsg), "DEX signature", msgjson.RPCInternalError)
 	rig.signer.err = nil
 
 	sigMsg := randBytes(73)
-	sig, err := user.privKey.Sign(sigMsg)
-	if err != nil {
-		t.Fatalf("signing error: %v", err)
-	}
+	sig := ecdsa.Sign(user.privKey, sigMsg)
 	rig.signer.sig = sig
 
 	// Send a valid notifyfee, and check the response.
-	rpcErr := doWaiter(goodMsg)
+	rpcErr := doWaiter(ctx, goodMsg)
 	if rpcErr != nil {
 		t.Fatalf("error sending valid notifyfee: %s", rpcErr.Message)
 	}
@@ -1079,7 +1069,8 @@ func TestHandleNotifyFee(t *testing.T) {
 func TestAuthManager_RecordCancel_RecordCompletedOrder(t *testing.T) {
 	resetStorage()
 	user := tNewUser(t)
-	connectUser(t, user)
+	ctx := context.Background()
+	connectUser(ctx, t, user)
 
 	client := rig.mgr.user(user.acctID)
 	if client == nil {

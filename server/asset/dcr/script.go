@@ -9,8 +9,9 @@ import (
 	dexdcr "decred.org/dcrdex/dex/dcr"
 	"github.com/decred/dcrd/dcrec"
 	"github.com/decred/dcrd/dcrec/edwards/v2"
-	"github.com/decred/dcrd/dcrec/secp256k1/v2"
-	"github.com/decred/dcrd/dcrec/secp256k1/v2/schnorr"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3/ecdsa"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3/schnorr"
 )
 
 // Extract the sender and receiver addresses from a swap contract. If the
@@ -43,7 +44,7 @@ func checkSigS256(msg, pkBytes, sigBytes []byte) error {
 	if err != nil {
 		return fmt.Errorf("error decoding secp256k1 PublicKey from bytes: %v", err)
 	}
-	signature, err := secp256k1.ParseDERSignature(sigBytes)
+	signature, err := ecdsa.ParseDERSignature(sigBytes)
 	if err != nil {
 		return fmt.Errorf("error decoding secp256k1 Signature from bytes: %v", err)
 	}

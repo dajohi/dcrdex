@@ -130,7 +130,7 @@ func (conn *wsConnStub) Close() error {
 	return nil
 }
 
-func dummyRPCHandler(_ Link, _ *msgjson.Message) *msgjson.Error {
+func dummyRPCHandler(_ context.Context, _ Link, _ *msgjson.Message) *msgjson.Error {
 	return nil
 }
 
@@ -237,7 +237,7 @@ func TestClientRequests(t *testing.T) {
 
 	// Register all methods before sending any requests.
 	// 'getclient' grabs the server's link.
-	Route("getclient", func(c Link, _ *msgjson.Message) *msgjson.Error {
+	Route("getclient", func(_ context.Context, c Link, _ *msgjson.Message) *msgjson.Error {
 		testMtx.Lock()
 		defer testMtx.Unlock()
 		var ok bool
@@ -249,7 +249,7 @@ func TestClientRequests(t *testing.T) {
 	})
 	// Check request parses the request to a map of strings.
 	var parsedParams map[string]string
-	Route("checkrequest", func(c Link, msg *msgjson.Message) *msgjson.Error {
+	Route("checkrequest", func(_ context.Context, c Link, msg *msgjson.Message) *msgjson.Error {
 		testMtx.Lock()
 		defer testMtx.Unlock()
 		parsedParams = make(map[string]string)
@@ -265,18 +265,18 @@ func TestClientRequests(t *testing.T) {
 	// 'checkinvalid' should never be run, since the request has invalid
 	// formatting.
 	passed := false
-	Route("checkinvalid", func(_ Link, _ *msgjson.Message) *msgjson.Error {
+	Route("checkinvalid", func(_ context.Context, _ Link, _ *msgjson.Message) *msgjson.Error {
 		testMtx.Lock()
 		defer testMtx.Unlock()
 		passed = true
 		return nil
 	})
 	// 'error' returns an Error.
-	Route("error", func(_ Link, _ *msgjson.Message) *msgjson.Error {
+	Route("error", func(_ context.Context, _ Link, _ *msgjson.Message) *msgjson.Error {
 		return msgjson.NewError(550, "somemessage")
 	})
 	// 'ban' quarantines the user using the RPCQuarantineClient error code.
-	Route("ban", func(c Link, req *msgjson.Message) *msgjson.Error {
+	Route("ban", func(_ context.Context, c Link, req *msgjson.Message) *msgjson.Error {
 		rpcErr := msgjson.NewError(msgjson.RPCQuarantineClient, "user quarantined")
 		errMsg, _ := msgjson.NewResponse(req.ID, nil, rpcErr)
 		err := c.Send(errMsg)
@@ -290,14 +290,15 @@ func TestClientRequests(t *testing.T) {
 	// A helper function to reconnect to the server and grab the server's
 	// link.
 	var wg sync.WaitGroup
-	reconnect := func() {
+	reconnect := func(ctx context.Context) {
 		conn = newWsStub()
 		wg.Add(1)
-		go server.websocketHandler(&wg, conn, stubAddr)
+		go server.websocketHandler(ctx, &wg, conn, stubAddr)
 		time.Sleep(time.Millisecond * 10)
 		sendToServer("getclient", `{}`)
 	}
-	reconnect()
+	ctx := context.Background()
+	reconnect(ctx)
 
 	defer func() {
 		server.disconnectClients()
@@ -353,7 +354,7 @@ func TestClientRequests(t *testing.T) {
 	}
 
 	// Shut the client down. Check the on flag.
-	reconnect()
+	reconnect(ctx)
 	lockedExe(func() { client.Disconnect() })
 	time.Sleep(time.Millisecond)
 	if clientOn() {
@@ -363,7 +364,7 @@ func TestClientRequests(t *testing.T) {
 	lockedExe(func() { client.Disconnect() })
 
 	// Reconnect and try shutting down with non-EOF error.
-	reconnect()
+	reconnect(ctx)
 	nonEOF <- struct{}{}
 	time.Sleep(time.Millisecond)
 	if clientOn() {
@@ -371,7 +372,7 @@ func TestClientRequests(t *testing.T) {
 	}
 
 	// Try a non-existent handler. This should not result in a disconnect.
-	reconnect()
+	reconnect(ctx)
 	sendToServer("nonexistent", "{}")
 	if !clientOn() {
 		t.Fatalf("client unexpectedly disconnected after invalid method")
@@ -388,7 +389,7 @@ func TestClientRequests(t *testing.T) {
 	}
 
 	// An RPC error. No disconnect.
-	reconnect()
+	reconnect(ctx)
 	sendToServer("error", "{}")
 	if !clientOn() {
 		t.Fatalf("client unexpectedly disconnected after rpc error")
@@ -427,7 +428,7 @@ func TestClientRequests(t *testing.T) {
 	}
 
 	// Test an invalid ID.
-	reconnect()
+	reconnect(ctx)
 	msg := makeReq("getclient", `{}`)
 	msg.ID = 555
 	sendReplace(t, conn, msg, "555", "{}")
@@ -447,7 +448,7 @@ func TestClientResponses(t *testing.T) {
 
 	// Register all methods before sending any requests.
 	// 'getclient' grabs the server's link.
-	Route("grabclient", func(c Link, _ *msgjson.Message) *msgjson.Error {
+	Route("grabclient", func(_ context.Context, c Link, _ *msgjson.Message) *msgjson.Error {
 		testMtx.Lock()
 		defer testMtx.Unlock()
 		var ok bool
@@ -486,14 +487,15 @@ func TestClientResponses(t *testing.T) {
 	}
 
 	var wg sync.WaitGroup
-	reconnect := func() {
+	reconnect := func(ctx context.Context) {
 		conn = newWsStub()
 		wg.Add(1)
-		go server.websocketHandler(&wg, conn, stubAddr)
+		go server.websocketHandler(ctx, &wg, conn, stubAddr)
 		time.Sleep(time.Millisecond * 10)
 		getClient()
 	}
-	reconnect()
+	ctx := context.Background()
+	reconnect(ctx)
 
 	defer func() {
 		server.disconnectClients()
@@ -616,14 +618,14 @@ func TestOnline(t *testing.T) {
 
 	// Register routes before starting server.
 	// No response simulates a route that returns no response.
-	Route("noresponse", func(_ Link, _ *msgjson.Message) *msgjson.Error {
+	Route("noresponse", func(_ context.Context, _ Link, _ *msgjson.Message) *msgjson.Error {
 		return nil
 	})
 	// The 'ok' route returns an affirmative response.
 	type okresult struct {
 		OK bool `json:"ok"`
 	}
-	Route("ok", func(c Link, msg *msgjson.Message) *msgjson.Error {
+	Route("ok", func(_ context.Context, c Link, msg *msgjson.Message) *msgjson.Error {
 		resp, err := msgjson.NewResponse(msg.ID, &okresult{OK: true}, nil)
 		if err != nil {
 			return msgjson.NewError(500, err.Error())
@@ -635,7 +637,7 @@ func TestOnline(t *testing.T) {
 		return nil
 	})
 	// The 'banuser' route quarantines the user.
-	Route("banuser", func(c Link, req *msgjson.Message) *msgjson.Error {
+	Route("banuser", func(_ context.Context, c Link, req *msgjson.Message) *msgjson.Error {
 		rpcErr := msgjson.NewError(msgjson.RPCQuarantineClient, "test quarantine")
 		msg, _ := msgjson.NewResponse(req.ID, nil, rpcErr)
 		err := c.Send(msg)

@@ -1822,7 +1822,7 @@ func TestTradeTracking(t *testing.T) {
 	dcrWallet, tDcrWallet := newTWallet(tDCR.ID)
 	tCore.wallets[tDCR.ID] = dcrWallet
 	dcrWallet.address = "DsVmA7aqqWeKWy461hXjytbZbgCqbB8g2dq"
-	ctx :=  context.Background()
+	ctx := context.Background()
 	dcrWallet.Unlock(ctx, wPW, time.Hour)
 
 	btcWallet, tBtcWallet := newTWallet(tBTC.ID)

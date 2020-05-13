@@ -385,10 +385,10 @@ func (c *tCoin) ID() dex.Bytes {
 	}
 	return make([]byte, 36)
 }
-func (c *tCoin) String() string                 { return hex.EncodeToString(c.id) }
-func (c *tCoin) Value() uint64                  { return 100 }
+func (c *tCoin) String() string                                { return hex.EncodeToString(c.id) }
+func (c *tCoin) Value() uint64                                 { return 100 }
 func (c *tCoin) Confirmations(context.Context) (uint32, error) { return 2, nil }
-func (c *tCoin) Redeem() dex.Bytes              { return nil }
+func (c *tCoin) Redeem() dex.Bytes                             { return nil }
 
 func TestReturnCoins(t *testing.T) {
 	wallet, node, shutdown := tNewWallet()
@@ -442,7 +442,7 @@ func TestFundingCoins(t *testing.T) {
 	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
 	node.rawRes[methodLockUnspent] = mustMarshal(t, true)
 	coinIDs := []dex.Bytes{coinID}
-	
+
 	ctx := context.Background()
 	ensureGood := func() {
 		coins, err := wallet.FundingCoins(ctx, coinIDs)

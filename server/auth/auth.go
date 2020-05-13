@@ -16,7 +16,8 @@ import (
 	"decred.org/dcrdex/dex/wait"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/comms"
-	"github.com/decred/dcrd/dcrec/secp256k1/v2"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3"
+	"github.com/decred/dcrd/dcrec/secp256k1/v3/ecdsa"
 )
 
 const cancelThreshWindow = 25 // spec
@@ -43,7 +44,7 @@ type Storage interface {
 
 // Signer signs messages. It is likely a secp256k1.PrivateKey.
 type Signer interface {
-	Sign(hash []byte) (*secp256k1.Signature, error)
+	Serialize() []byte
 	PubKey() *secp256k1.PublicKey
 }
 
@@ -270,10 +271,7 @@ func (auth *AuthManager) Sign(signables ...msgjson.Signable) error {
 		if err != nil {
 			return fmt.Errorf("signature message for signable index %d: %v", i, err)
 		}
-		sig, err := auth.signer.Sign(sigMsg)
-		if err != nil {
-			return fmt.Errorf("signature error: %v", err)
-		}
+		sig := ecdsa.Sign(auth.signer, sigMsg)
 		signable.SetSig(sig.Serialize())
 	}
 	return nil
@@ -570,7 +568,7 @@ func (auth *AuthManager) handleResponse(conn comms.Link, msg *msgjson.Message) {
 // checkSigS256 checks that the message's signature was created with the
 // private key for the provided secp256k1 public key.
 func checkSigS256(msg, sig []byte, pubKey *secp256k1.PublicKey) error {
-	signature, err := secp256k1.ParseDERSignature(sig)
+	signature, err := ecdsa.ParseDERSignature(sig)
 	if err != nil {
 		return fmt.Errorf("error decoding secp256k1 Signature from bytes: %v", err)
 	}
