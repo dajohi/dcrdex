@@ -45,7 +45,7 @@ cd $dir
 # static checker.
 
 # check linters
-golangci-lint run --disable-all --deadline=10m \
+golangci-lint run --disable-all --deadline=10m --max-same-issues=0 \
   --out-format=github-actions \
   --enable=goimports \
   --enable=govet \
@@ -55,4 +55,5 @@ golangci-lint run --disable-all --deadline=10m \
   --enable=ineffassign \
   --enable=asciicheck \
   --enable=rowserrcheck \
-  --enable=sqlclosecheck
+  --enable=sqlclosecheck \
+  --enable=errorlint
