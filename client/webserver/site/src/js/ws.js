@@ -20,125 +20,132 @@
 // Based on messagesocket_service.js by Jonathan Chappelow @ dcrdata, which is
 // based on ws_events_dispatcher.js by Ismael Celis
 
-const typeRequest = 1
+const typeRequest = 1;
 
-function forward (route, payload, handlers) {
+function forward(route, payload, handlers) {
   if (!route && payload.error) {
-    const err = payload.error
-    console.error(`websocket error (code ${err.code}): ${err.message}`)
-    return
+    const err = payload.error;
+    console.error(`websocket error (code ${err.code}): ${err.message}`);
+    return;
   }
-  if (typeof handlers[route] === 'undefined') {
+  if (typeof handlers[route] === "undefined") {
     // console.log(`unhandled message for ${route}: ${payload}`)
-    return
+    return;
   }
   // call each handler
-  for (var i = 0; i < handlers[route].length; i++) {
-    handlers[route][i](payload)
+  for (let i = 0; i < handlers[route].length; i++) {
+    handlers[route][i](payload);
   }
 }
 
-var id = 0
+let id = 0;
 
 class MessageSocket {
-  constructor () {
-    this.uri = undefined
-    this.connection = undefined
-    this.handlers = {}
-    this.queue = []
-    this.maxQlength = 5
+  constructor() {
+    this.uri = undefined;
+    this.connection = undefined;
+    this.handlers = {};
+    this.queue = [];
+    this.maxQlength = 5;
   }
 
-  registerRoute (route, handler) {
-    this.handlers[route] = this.handlers[route] || []
-    this.handlers[route].push(handler)
+  registerRoute(route, handler) {
+    this.handlers[route] = this.handlers[route] || [];
+    this.handlers[route].push(handler);
   }
 
-  deregisterRoute (route) {
-    this.handlers[route] = []
+  deregisterRoute(route) {
+    this.handlers[route] = [];
   }
 
   // request sends a request-type message to the server
-  request (route, payload) {
-    if (!this.connection || this.connection.readyState !== window.WebSocket.OPEN) {
-      while (this.queue.length > this.maxQlength - 1) this.queue.shift()
-      this.queue.push([route, payload])
-      return
+  request(route, payload) {
+    if (
+      !this.connection ||
+      this.connection.readyState !== window.WebSocket.OPEN
+    ) {
+      while (this.queue.length > this.maxQlength - 1) this.queue.shift();
+      this.queue.push([route, payload]);
+      return;
     }
-    id++
-    var message = JSON.stringify({
+    id++;
+    const message = JSON.stringify({
       route: route,
       type: typeRequest,
       id: id,
       payload: payload
-    })
+    });
 
-    window.log('ws', 'sending', message)
-    this.connection.send(message)
+    window.log("ws", "sending", message);
+    this.connection.send(message);
   }
 
-  close (reason) {
-    window.log('ws', 'close, reason:', reason, this.handlers)
-    this.handlers = {}
-    this.connection.close()
+  close(reason) {
+    window.log("ws", "close, reason:", reason, this.handlers);
+    this.handlers = {};
+    this.connection.close();
   }
 
-  connect (uri, reloader) {
-    this.uri = uri
-    this.reloader = reloader
-    var retrys = 0
+  connect(uri, reloader) {
+    this.uri = uri;
+    this.reloader = reloader;
+    let retrys = 0;
     const go = () => {
-      window.log('ws', `connecting to ${uri}`)
-      var conn = this.connection = new window.WebSocket(uri)
-      var timeout = setTimeout(() => {
+      window.log("ws", `connecting to ${uri}`);
+      let conn = (this.connection = new window.WebSocket(uri));
+      const timeout = setTimeout(() => {
         // readyState is still WebSocket.CONNECTING. Cancel and trigger onclose.
-        conn.close()
-      }, 500)
+        conn.close();
+      }, 500);
 
       // unmarshal message, and forward the message to registered handlers
       conn.onmessage = (evt) => {
-        var message = JSON.parse(evt.data)
-        forward(message.route, message.payload, this.handlers)
-      }
+        const message = JSON.parse(evt.data);
+        forward(message.route, message.payload, this.handlers);
+      };
 
       // Stub out standard functions
       conn.onclose = (evt) => {
-        window.log('ws', 'onclose')
-        clearTimeout(timeout)
-        conn = this.connection = null
-        forward('close', null, this.handlers)
-        retrys++
+        window.log("ws", "onclose");
+        clearTimeout(timeout);
+        conn = this.connection = null;
+        forward("close", null, this.handlers);
+        retrys++;
         // 1.2, 1.6, 2.0, 2.4, 3.1, 3.8, 4.8, 6.0, 7.5, 9.3, ...
-        const delay = Math.min(Math.pow(1.25, retrys), 10)
-        console.error(`websocket disconnected (${evt.code}), trying again in ${delay.toFixed(1)} seconds`)
+        const delay = Math.min(Math.pow(1.25, retrys), 10);
+        console.error(
+          `websocket disconnected (${
+            evt.code
+          }), trying again in ${delay.toFixed(1)} seconds`
+        );
         setTimeout(() => {
-          go()
-        }, delay * 1000)
-      }
+          go();
+        }, delay * 1000);
+      };
 
       conn.onopen = () => {
-        window.log('ws', 'onopen')
-        clearTimeout(timeout)
+        window.log("ws", "onopen");
+        clearTimeout(timeout);
         if (retrys > 0) {
-          retrys = 0
-          reloader()
+          retrys = 0;
+          reloader();
         }
-        forward('open', null, this.handlers)
-        const queue = this.queue
-        this.queue = []
+        forward("open", null, this.handlers);
+        const queue = this.queue;
+        this.queue = [];
         for (const [route, message] of queue) {
-          this.request(route, message)
+          this.request(route, message);
         }
-      }
+      };
 
       conn.onerror = (evt) => {
-        window.log('ws', 'onerror:', evt)
-        forward('error', evt, this.handlers)
-      }
-    }
-    go()
+        window.log("ws", "onerror:", evt);
+        forward("error", evt, this.handlers);
+      };
+    };
+    go();
   }
 }
 
-var ws = new MessageSocket()
-export default ws
+const ws = new MessageSocket();
+export default ws;
