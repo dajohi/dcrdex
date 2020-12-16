@@ -1,9 +1,9 @@
-export const IGNORE = 0
-export const DATA = 1
-export const POKE = 2
-export const SUCCESS = 3
-export const WARNING = 4
-export const ERROR = 5
+export const IGNORE = 0;
+export const DATA = 1;
+export const POKE = 2;
+export const SUCCESS = 3;
+export const WARNING = 4;
+export const ERROR = 5;
 
 /*
  * make constructs a new notification. The notification structure is a mirror of
@@ -19,5 +19,5 @@ export function make (subject, details, severity) {
     details: details,
     severity: severity,
     stamp: new Date().getTime()
-  }
+  };
 }
