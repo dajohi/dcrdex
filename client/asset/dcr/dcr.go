@@ -26,8 +26,8 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
 	dexdcr "decred.org/dcrdex/dex/networks/dcr"
-	"decred.org/dcrwallet/rpc/client/dcrwallet"
-	walletjson "decred.org/dcrwallet/rpc/jsonrpc/types"
+	"decred.org/dcrwallet/v2/rpc/client/dcrwallet"
+	walletjson "decred.org/dcrwallet/v2/rpc/jsonrpc/types"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrec"
@@ -35,8 +35,8 @@ import (
 	"github.com/decred/dcrd/dcrec/secp256k1/v3/ecdsa"
 	"github.com/decred/dcrd/dcrjson/v3"
 	"github.com/decred/dcrd/dcrutil/v3"
-	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v2"
-	"github.com/decred/dcrd/rpcclient/v6"
+	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v3"
+	"github.com/decred/dcrd/rpcclient/v7"
 	"github.com/decred/dcrd/txscript/v3"
 	"github.com/decred/dcrd/wire"
 )
@@ -149,10 +149,10 @@ var (
 
 // rpcClient is an rpcclient.Client, or a stub for testing.
 type rpcClient interface {
-	EstimateSmartFee(ctx context.Context, confirmations int64, mode chainjson.EstimateSmartFeeMode) (float64, error)
+	EstimateSmartFee(ctx context.Context, confirmations int64, mode chainjson.EstimateSmartFeeMode) (*chainjson.EstimateSmartFeeResult, error)
 	GetBlockChainInfo(ctx context.Context) (*chainjson.GetBlockChainInfoResult, error)
 	SendRawTransaction(ctx context.Context, tx *wire.MsgTx, allowHighFees bool) (*chainhash.Hash, error)
-	GetTxOut(ctx context.Context, txHash *chainhash.Hash, index uint32, mempool bool) (*chainjson.GetTxOutResult, error)
+	GetTxOut(ctx context.Context, txHash *chainhash.Hash, index uint32, tree int8, mempool bool) (*chainjson.GetTxOutResult, error)
 	GetBalanceMinConf(ctx context.Context, account string, minConfirms int) (*walletjson.GetBalanceResult, error)
 	GetBestBlock(ctx context.Context) (*chainhash.Hash, int64, error)
 	GetBlockHash(ctx context.Context, blockHeight int64) (*chainhash.Hash, error)
@@ -655,7 +655,7 @@ func (dcr *ExchangeWallet) feeRate(confTarget uint64) (uint64, error) {
 	if err != nil {
 		return 0, translateRPCCancelErr(err)
 	}
-	atomsPerKB, err := dcrutil.NewAmount(dcrPerKB) // satPerKB is 0 when err != nil
+	atomsPerKB, err := dcrutil.NewAmount(dcrPerKB.FeeRate) // satPerKB is 0 when err != nil
 	if err != nil {
 		return 0, err
 	}
@@ -1127,7 +1127,7 @@ func (dcr *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 		if !notFound[pt] {
 			continue
 		}
-		txOut, err := dcr.node.GetTxOut(dcr.ctx, txHash, output.Vout, true)
+		txOut, err := dcr.node.GetTxOut(dcr.ctx, txHash, output.Vout, output.Tree, true)
 		if err != nil {
 			return nil, fmt.Errorf("gettxout error for locked output %v: %w", pt.String(), translateRPCCancelErr(err))
 		}
@@ -1391,7 +1391,7 @@ func (dcr *ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys,
 		addr = fCoin.addr
 	} else {
 		// Check if we can get the address from gettxout.
-		txOut, err := dcr.node.GetTxOut(dcr.ctx, op.txHash(), op.vout(), true)
+		txOut, err := dcr.node.GetTxOut(dcr.ctx, op.txHash(), op.vout(), op.tree, true)
 		if err == nil && txOut != nil {
 			addrs := txOut.ScriptPubKey.Addresses
 			if len(addrs) != 1 {
@@ -1439,7 +1439,7 @@ func (dcr *ExchangeWallet) AuditContract(coinID, contract dex.Bytes) (asset.Audi
 		return nil, fmt.Errorf("error extracting swap addresses: %w", err)
 	}
 	// Get the contracts P2SH address from the tx output's pubkey script.
-	txOut, err := dcr.node.GetTxOut(dcr.ctx, txHash, vout, true)
+	txOut, err := dcr.node.GetTxOut(dcr.ctx, txHash, vout, wire.TxTreeRegular, true)
 	if err != nil {
 		return nil, fmt.Errorf("error finding unspent contract: %w", translateRPCCancelErr(err))
 	}
@@ -1849,7 +1849,7 @@ func (dcr *ExchangeWallet) Refund(coinID, contract dex.Bytes) (dex.Bytes, error)
 		return nil, err
 	}
 	// Grab the unspent output to make sure it's good and to get the value.
-	utxo, err := dcr.node.GetTxOut(dcr.ctx, txHash, vout, true)
+	utxo, err := dcr.node.GetTxOut(dcr.ctx, txHash, vout, wire.TxTreeRegular, true)
 	if err != nil {
 		return nil, fmt.Errorf("error finding unspent contract: %w", translateRPCCancelErr(err))
 	}
@@ -2004,7 +2004,7 @@ func (dcr *ExchangeWallet) Confirmations(ctx context.Context, id dex.Bytes) (con
 		return 0, false, err
 	}
 	// Check for an unspent output.
-	txOut, err := dcr.node.GetTxOut(ctx, txHash, vout, true)
+	txOut, err := dcr.node.GetTxOut(ctx, txHash, vout, wire.TxTreeRegular, true)
 	if err == nil && txOut != nil {
 		return uint32(txOut.Confirmations), false, nil
 	}
@@ -2147,7 +2147,7 @@ func (dcr *ExchangeWallet) convertCoin(coin asset.Coin) (*output, error) {
 	if err != nil {
 		return nil, err
 	}
-	txOut, err := dcr.node.GetTxOut(dcr.ctx, txHash, vout, true)
+	txOut, err := dcr.node.GetTxOut(dcr.ctx, txHash, vout, wire.TxTreeRegular, true)
 	if err != nil {
 		return nil, fmt.Errorf("error finding unspent output %s:%d: %w", txHash, vout, translateRPCCancelErr(err))
 	}

@@ -3,7 +3,7 @@ module decred.org/dcrdex
 go 1.14
 
 require (
-	decred.org/dcrwallet v1.6.0-rc4
+	decred.org/dcrwallet/v2 v2.0.0-20210218210944-92011ed5f668
 	github.com/btcsuite/btcd v0.20.1-beta.0.20200615134404-e4f59022a387
 	github.com/btcsuite/btcutil v1.0.2
 	github.com/davecgh/go-spew v1.1.1
@@ -18,8 +18,8 @@ require (
 	github.com/decred/dcrd/dcrjson/v3 v3.1.0
 	github.com/decred/dcrd/dcrutil/v3 v3.0.0
 	github.com/decred/dcrd/hdkeychain/v3 v3.0.0
-	github.com/decred/dcrd/rpc/jsonrpc/types/v2 v2.3.0
-	github.com/decred/dcrd/rpcclient/v6 v6.0.2
+	github.com/decred/dcrd/rpc/jsonrpc/types/v3 v3.0.0-20210129200153-14fd1a785bf2
+	github.com/decred/dcrd/rpcclient/v7 v7.0.0-20210218185512-62b7ed1b6ba3
 	github.com/decred/dcrd/txscript/v3 v3.0.0
 	github.com/decred/dcrd/wire v1.4.0
 	github.com/decred/go-socks v1.1.0

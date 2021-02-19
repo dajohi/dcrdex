@@ -11,7 +11,7 @@ import (
 	"fmt"
 
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrwallet/wallet/txsizes"
+	"decred.org/dcrwallet/v2/wallet/txsizes"
 	"github.com/decred/dcrd/chaincfg/v3"
 	"github.com/decred/dcrd/dcrec"
 	"github.com/decred/dcrd/dcrutil/v3"

@@ -25,8 +25,8 @@ import (
 	"github.com/decred/dcrd/dcrjson/v3"
 	"github.com/decred/dcrd/dcrutil/v3"
 	"github.com/decred/dcrd/hdkeychain/v3"
-	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v2"
-	"github.com/decred/dcrd/rpcclient/v6"
+	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v3"
+	"github.com/decred/dcrd/rpcclient/v7"
 	"github.com/decred/dcrd/wire"
 )
 
@@ -69,8 +69,8 @@ const (
 // satisfied by rpcclient.Client, and all methods are matches for Client
 // methods. For testing, it can be satisfied by a stub.
 type dcrNode interface {
-	EstimateSmartFee(ctx context.Context, confirmations int64, mode chainjson.EstimateSmartFeeMode) (float64, error)
-	GetTxOut(ctx context.Context, txHash *chainhash.Hash, index uint32, mempool bool) (*chainjson.GetTxOutResult, error)
+	EstimateSmartFee(ctx context.Context, confirmations int64, mode chainjson.EstimateSmartFeeMode) (*chainjson.EstimateSmartFeeResult, error)
+	GetTxOut(ctx context.Context, txHash *chainhash.Hash, index uint32, tree int8, mempool bool) (*chainjson.GetTxOutResult, error)
 	GetRawTransactionVerbose(ctx context.Context, txHash *chainhash.Hash) (*chainjson.TxRawResult, error)
 	GetBlockVerbose(ctx context.Context, blockHash *chainhash.Hash, verboseTx bool) (*chainjson.GetBlockVerboseResult, error)
 	GetBlockHash(ctx context.Context, blockHeight int64) (*chainhash.Hash, error)
@@ -245,7 +245,7 @@ func (dcr *Backend) FeeRate() (uint64, error) {
 	if err != nil {
 		return 0, translateRPCCancelErr(err)
 	}
-	atomsPerKB, err := dcrutil.NewAmount(dcrPerKB)
+	atomsPerKB, err := dcrutil.NewAmount(dcrPerKB.FeeRate)
 	if err != nil {
 		return 0, err
 	}
@@ -339,7 +339,7 @@ func (dcr *Backend) FundingCoin(ctx context.Context, coinID []byte, redeemScript
 	if err != nil {
 		return nil, fmt.Errorf("error decoding coin ID %x: %w", coinID, err)
 	}
-	utxo, err := dcr.utxo(ctx, txHash, vout, redeemScript)
+	utxo, err := dcr.utxo(ctx, txHash, vout, wire.TxTreeRegular, redeemScript)
 	if err != nil {
 		return nil, err
 	}
@@ -393,7 +393,7 @@ func (dcr *Backend) VerifyUnspentCoin(ctx context.Context, coinID []byte) error 
 	if err != nil {
 		return fmt.Errorf("error decoding coin ID %x: %w", coinID, err)
 	}
-	txOut, err := dcr.node.GetTxOut(ctx, txHash, vout, true)
+	txOut, err := dcr.node.GetTxOut(ctx, txHash, vout, wire.TxTreeRegular, true)
 	if err != nil {
 		return fmt.Errorf("GetTxOut (%s:%d): %w", txHash.String(), vout, translateRPCCancelErr(err))
 	}
@@ -721,8 +721,8 @@ func (dcr *Backend) blockInfo(ctx context.Context, verboseTx *chainjson.TxRawRes
 }
 
 // Get the UTXO, populating the block data along the way.
-func (dcr *Backend) utxo(ctx context.Context, txHash *chainhash.Hash, vout uint32, redeemScript []byte) (*UTXO, error) {
-	txOut, verboseTx, pkScript, err := dcr.getTxOutInfo(ctx, txHash, vout)
+func (dcr *Backend) utxo(ctx context.Context, txHash *chainhash.Hash, vout uint32, tree int8, redeemScript []byte) (*UTXO, error) {
+	txOut, verboseTx, pkScript, err := dcr.getTxOutInfo(ctx, txHash, vout, tree)
 	if err != nil {
 		return nil, err
 	}
@@ -902,8 +902,8 @@ func msgTxFromHex(txhex string) (*wire.MsgTx, error) {
 }
 
 // Get information for an unspent transaction output.
-func (dcr *Backend) getUnspentTxOut(ctx context.Context, txHash *chainhash.Hash, vout uint32) (*chainjson.GetTxOutResult, []byte, error) {
-	txOut, err := dcr.node.GetTxOut(ctx, txHash, vout, true)
+func (dcr *Backend) getUnspentTxOut(ctx context.Context, txHash *chainhash.Hash, vout uint32, tree int8) (*chainjson.GetTxOutResult, []byte, error) {
+	txOut, err := dcr.node.GetTxOut(ctx, txHash, vout, tree, true)
 	if err != nil {
 		return nil, nil, fmt.Errorf("GetTxOut error for output %s:%d: %w",
 			txHash, vout, translateRPCCancelErr(err))
@@ -920,8 +920,8 @@ func (dcr *Backend) getUnspentTxOut(ctx context.Context, txHash *chainhash.Hash,
 
 // Get information for an unspent transaction output, plus the verbose
 // transaction.
-func (dcr *Backend) getTxOutInfo(ctx context.Context, txHash *chainhash.Hash, vout uint32) (*chainjson.GetTxOutResult, *chainjson.TxRawResult, []byte, error) {
-	txOut, pkScript, err := dcr.getUnspentTxOut(ctx, txHash, vout)
+func (dcr *Backend) getTxOutInfo(ctx context.Context, txHash *chainhash.Hash, vout uint32, tree int8) (*chainjson.GetTxOutResult, *chainjson.TxRawResult, []byte, error) {
+	txOut, pkScript, err := dcr.getUnspentTxOut(ctx, txHash, vout, tree)
 	if err != nil {
 		return nil, nil, nil, err
 	}
