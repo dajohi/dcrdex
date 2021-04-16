@@ -61,4 +61,5 @@ golangci-lint run --disable-all --deadline=10m \
   --enable=ineffassign \
   --enable=asciicheck \
   --enable=rowserrcheck \
-  --enable=sqlclosecheck
+  --enable=sqlclosecheck \
+  --enable=noctx
