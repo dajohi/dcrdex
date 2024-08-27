@@ -9,7 +9,11 @@ linters:
   enable:
     - asciicheck
     - bidichk
+    - bodyclose
     - durationcheck
+    - errchkjson
+    - errorlint
+    - exportloopref
     - gofmt
     - goimports
     - gosimple
@@ -17,6 +21,7 @@ linters:
     - grouper
     - ineffassign
     - makezero
+    - nilerr
     - nosprintfhostport
     - reassign
     - rowserrcheck
@@ -24,3 +29,4 @@ linters:
     - tparallel
     - typecheck
     - unconvert
+    - unused
